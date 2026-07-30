@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Tropical Cyclone Tracks</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  /* OCHA Common Design System tokens (subset) */
+  :root{
+    --brand-primary:#009EDB; --brand-primary-text:#0077B8; --brand-dark:#004987;
+    --brand-light:#64BDEA; --brand-highlight:#ED1847;
+    --ink:#4D4D4D; --muted:#737373; --faint:#9aa0a6;
+    --surface:#F2F2F2; --line:#BFBFBF; --line-soft:#E2E2E2; --white:#fff;
+    --accent:var(--brand-primary-text); --accent-bg:#E6F3FA;
+    --font:'Roboto',Arial,system-ui,sans-serif;
+    --font-cond:'Roboto Condensed',Arial,sans-serif;
+    --radius:4px; --header-h:52px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:var(--font);color:var(--ink);background:var(--surface)}
+
+  /* ---- OCHA header ---- */
+  .app-header{height:var(--header-h);background:var(--brand-primary);color:#fff;
+    display:flex;align-items:center;gap:14px;padding:0 18px}
+  .app-header__brand{font-weight:700;font-size:18px;letter-spacing:.06em;
+    padding-right:14px;border-right:1px solid rgba(255,255,255,.5)}
+  .app-header__title{font-size:16px;font-weight:500}
+  .app-header__spacer{flex:1}
+  .app-header__meta{font-size:12px;color:rgba(255,255,255,.9)}
+
+  #app{display:flex;height:calc(100vh - var(--header-h));overflow:hidden;background:var(--white)}
+
+  /* ---- sidebar ---- */
+  #side{width:300px;min-width:240px;max-width:560px;flex:none;background:var(--white);
+        display:flex;flex-direction:column;overflow-y:auto}
+  #resizer{width:6px;flex:none;cursor:col-resize;background:var(--line-soft);
+           border-left:1px solid var(--line);border-right:1px solid var(--line)}
+  #resizer:hover,#resizer.drag{background:var(--brand-light)}
+  .sec{padding:14px 16px;border-bottom:1px solid var(--line-soft)}
+  .sec h1{font-size:18px;font-weight:500;margin:0;font-family:var(--font-cond)}
+  .sec .sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .lbl{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+       margin-bottom:10px;display:flex;justify-content:space-between;align-items:center}
+  .lbl a,.link{color:var(--accent);cursor:pointer;text-transform:none;letter-spacing:0;font-size:11px}
+  .lbl a:hover,.link:hover{text-decoration:underline}
+  select,input[type=text]{width:100%;height:36px;padding:0 10px;font-size:14px;color:var(--ink);
+       font-family:var(--font);background:#fff;border:1px solid var(--line);border-radius:var(--radius);outline:none}
+  input[type=text]{padding-left:30px}
+  select:focus,input:focus{border-color:var(--brand-primary);
+       box-shadow:0 0 0 3px var(--brand-light)}
+  .field{margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  .field > span{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  .field > span b{color:var(--ink);font-weight:500;float:right;font-variant-numeric:tabular-nums}
+  .search{position:relative}
+  .search .ic{position:absolute;left:9px;top:10px;color:var(--faint);font-size:15px;pointer-events:none}
+
+  /* ---- dual-range slider ---- */
+  .rng{position:relative;height:24px}
+  .rng-track{position:absolute;top:10px;left:0;right:0;height:4px;background:var(--line);border-radius:2px}
+  .rng-fill{position:absolute;height:100%;background:var(--brand-primary);border-radius:2px}
+  .rng input[type=range]{-webkit-appearance:none;appearance:none;position:absolute;top:4px;left:0;
+       width:100%;height:16px;margin:0;background:none;pointer-events:none}
+  .rng input[type=range]:focus{outline:none}
+  .rng input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;pointer-events:auto;
+       width:16px;height:16px;border-radius:50%;background:#fff;border:2px solid var(--brand-primary);
+       cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+  .rng input[type=range]::-moz-range-thumb{pointer-events:auto;width:14px;height:14px;border-radius:50%;
+       background:#fff;border:2px solid var(--brand-primary);cursor:pointer}
+  .rng input[type=range]:focus::-webkit-slider-thumb{box-shadow:0 0 0 3px var(--brand-light)}
+
+  /* ---- month histogram ---- */
+  .hist{display:flex;align-items:flex-end;gap:2px;height:38px;margin-bottom:5px}
+  .hist .bar{flex:1;background:var(--line);border-radius:2px 2px 0 0;min-height:1px;transition:height .15s}
+  .hist .bar.sel{background:var(--brand-primary)}
+  .mlabels{display:flex;margin-top:3px}
+  .mlabels span{flex:1;text-align:center;font-size:10px;color:var(--muted)}
+
+  /* ---- layer tree ---- */
+  .layer{display:flex;align-items:flex-start;gap:8px;font-size:14px;padding:3px 0}
+  .layer input[type=checkbox]{accent-color:var(--brand-primary);width:16px;height:16px;cursor:pointer;flex:none;margin-top:2px}
+  .layer .sw{width:16px;height:5px;border-radius:2px;flex:none;margin-top:7px}
+  .layer .swc{width:11px;height:11px;border-radius:50%;flex:none;margin-top:4px}
+  .layer .nm{flex:1;cursor:pointer;line-height:1.35}
+  .chev{width:10px;flex:none;font-size:9px;color:var(--faint);cursor:pointer;
+        user-select:none;transition:transform .15s;line-height:1;margin-top:5px}
+  .chev.open{transform:rotate(90deg)}
+  .layer-body{display:none;margin:3px 0 8px 34px}
+  .layer-body.open{display:block}
+  .leg-row{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);padding:2px 0}
+  .leg-row .dot{width:15px;height:4px;border-radius:2px;flex:none}
+  .leg-note{font-size:12px;color:var(--muted);line-height:1.45;margin-bottom:7px}
+
+  .badge{font-size:10px;padding:1px 6px;border-radius:8px;background:#E6F3FA;color:var(--brand-primary-text)}
+  .hint{display:flex;align-items:center;gap:8px;padding:7px 9px;margin-top:6px;font-size:12px;
+        color:var(--faint);border:1px dashed var(--line);border-radius:var(--radius)}
+
+  /* ---- intensity chips ---- */
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{display:flex;align-items:center;gap:5px;font-size:12px;padding:4px 10px;border-radius:14px;
+        background:var(--surface);border:1px solid var(--line);cursor:pointer;user-select:none}
+  .chip .dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .chip.on{background:var(--accent-bg);border-color:var(--brand-primary);color:var(--brand-primary-text);font-weight:500}
+  .subtle{font-size:11px;color:var(--faint);margin-top:7px;line-height:1.45}
+  .count{font-size:13px;color:var(--ink);margin-top:12px}
+  .count b{font-family:var(--font-cond);font-size:20px;font-weight:700;color:var(--brand-primary-text)}
+  .source{font-size:11px;color:var(--faint);line-height:1.5}
+
+  /* El Niño reads as its own panel — a second, independent system */
+  .epi-block{background:var(--surface);margin:12px 10px 8px;border:1px solid var(--line);border-radius:10px}
+  .epi-block .chip{background:#fff}   /* keep chips legible on the tinted panel */
+
+  /* ---- floating detail card ---- */
+  #detail{display:none;position:absolute;left:14px;bottom:26px;width:250px;z-index:5;
+          background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px 14px;
+          box-shadow:0 2px 14px rgba(0,0,0,.18)}
+  #detail .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  #detail .nm{font-size:16px;font-weight:500;font-family:var(--font-cond)}
+  #detail .x{cursor:pointer;color:var(--muted);font-size:16px;line-height:1;background:none;border:none;padding:0}
+  #detail .tags{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+  #detail .tag{font-size:10px;padding:2px 8px;border-radius:8px;background:var(--accent-bg);color:var(--brand-primary-text)}
+  #detail table{width:100%;font-size:12px;border-collapse:collapse}
+  #detail td{padding:3px 0}
+  #detail td.k{color:var(--muted)}
+  #detail td.v{text-align:right;font-variant-numeric:tabular-nums}
+  #detail .note{margin-top:10px;font-size:11px;color:var(--brand-warning,#CF3F0B)}
+
+  /* ---- hover tooltip ---- */
+  .tip{pointer-events:none}
+  .tip .maplibregl-popup-content{padding:6px 10px;border-radius:6px;font-family:var(--font);
+       box-shadow:0 2px 10px rgba(0,0,0,.18);border:1px solid var(--line)}
+  .tip .maplibregl-popup-tip{display:none}
+  .tip-name{font-weight:500;font-size:13px;line-height:1.3}
+  .tip-sub{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:5px}
+  .tip-sub .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .tip-meta{font-size:11px;color:var(--faint)}
+
+  /* ---- map ---- */
+  #map{flex:1;position:relative}
+  #status{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;
+          background:#fff;border:1px solid var(--line);border-radius:var(--radius);
+          padding:6px 12px;font-size:12px;color:var(--muted);box-shadow:0 1px 4px rgba(0,0,0,.12)}
+  .ti{font-family:sans-serif;font-style:normal}
+
+  /* ---- methodology button + modal ---- */
+  .method-btn{position:absolute;top:12px;left:12px;z-index:6;display:flex;align-items:center;gap:8px;
+    background:#fff;border:1px solid var(--line);border-radius:22px;padding:8px 15px;font-size:14px;
+    font-weight:500;color:var(--ink);cursor:pointer;box-shadow:0 1px 6px rgba(0,0,0,.15);font-family:var(--font)}
+  .method-btn:hover{border-color:var(--brand-primary);color:var(--brand-primary-text)}
+  .method-btn svg{width:18px;height:18px;flex:none}
+  .modal{position:fixed;inset:0;z-index:50;background:rgba(20,28,38,.55);display:none;
+    align-items:flex-start;justify-content:center;padding:5vh 16px;overflow:auto}
+  .modal.open{display:flex}
+  .modal-panel{background:#fff;max-width:900px;width:100%;border-radius:14px;padding:34px 40px 30px;
+    box-shadow:0 12px 48px rgba(0,0,0,.35);position:relative}
+  .modal-eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--brand-primary-text);font-weight:500;margin-bottom:8px}
+  .modal-title{font-size:34px;line-height:1.15;font-weight:700;margin:0 0 8px;color:var(--ink)}
+  .modal-panel p.modal-lead{font-size:15px;font-weight:500;color:var(--brand-primary-text);margin:0 0 20px;max-width:none}
+  .modal-panel p{font-size:16px;line-height:1.6;color:var(--ink);margin:0 0 14px;max-width:74ch}
+  .modal-sub{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:20px 0 8px;font-weight:500}
+  .modal-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:8px 0 4px}
+  .modal-card{background:var(--surface);border:1px solid var(--line-soft);border-radius:10px;padding:14px 16px}
+  .modal-card h4{margin:0 0 4px;font-size:15px;font-weight:500;color:var(--brand-primary-text)}
+  .modal-card p{font-size:13px;line-height:1.45;color:var(--muted);margin:0;max-width:none}
+  .modal-src{font-size:12px;color:var(--faint);line-height:1.6;margin-top:20px;border-top:1px solid var(--line-soft);padding-top:14px}
+  .modal-close{position:absolute;top:16px;right:16px;width:36px;height:36px;border-radius:50%;
+    border:1px solid var(--line);background:#fff;color:var(--muted);font-size:17px;cursor:pointer;line-height:1}
+  .modal-close:hover{background:var(--surface);color:var(--ink)}
+  .modal-panel code{font-family:'Roboto Mono',monospace;font-size:.9em;background:var(--surface);padding:1px 5px;border-radius:4px;color:var(--brand-dark)}
+</style>
+</head>
+<body>
+<header class="app-header">
+  <span class="app-header__title">Tropical Cyclone Tracks</span>
+</header>
+<div id="app">
+  <aside id="side">
+    <div class="sec">
+      <h1 id="sideTitle">IBTrACS best-track</h1>
+    </div>
+
+    <div class="sec">
+      <div class="lbl">Basemap</div>
+      <div class="field"><select id="basemap" aria-label="Basemap"></select></div>
+    </div>
+
+    <!-- ── Block A: the main layer and the filters that control it ── -->
+    <div class="sec">
+      <div class="lbl">Cyclone tracks</div>
+      <div id="mainLayerList"></div>
+
+      <div class="lbl" style="margin-top:18px">Filter tracks <a id="resetFilters" role="button" tabindex="0">reset</a></div>
+      <div class="subtle" style="margin:-4px 0 14px">Applies to the Cyclone tracks layer only. El Niño episodes below are always shown in full.</div>
+
+      <div class="field">
+        <div class="lbl" style="margin-bottom:6px">Basin</div>
+        <div class="chips" id="basins"></div>
+      </div>
+
+      <div class="field">
+        <span>Year <b id="yearVals"></b></span>
+        <div class="rng" id="yearRange">
+          <div class="rng-track"><div class="rng-fill"></div></div>
+          <input type="range" class="rng-lo" aria-label="Year from" />
+          <input type="range" class="rng-hi" aria-label="Year to" />
+        </div>
+      </div>
+
+      <div class="field">
+        <span>Month <b id="monthVals"></b></span>
+        <div class="hist" id="monthHist" aria-hidden="true"></div>
+        <div class="rng" id="monthRange">
+          <div class="rng-track"><div class="rng-fill"></div></div>
+          <input type="range" class="rng-lo" aria-label="Month from" />
+          <input type="range" class="rng-hi" aria-label="Month to" />
+        </div>
+        <div class="mlabels"><span>J</span><span>F</span><span>M</span><span>A</span><span>M</span><span>J</span><span>J</span><span>A</span><span>S</span><span>O</span><span>N</span><span>D</span></div>
+      </div>
+
+      <div class="field">
+        <span>Storm name</span>
+        <div class="search"><span class="ic ti">⌕</span><input type="text" id="name" placeholder="e.g. MAWAR" /></div>
+      </div>
+
+      <div class="field">
+        <div class="lbl" style="margin-bottom:6px">Intensity <a id="clearCats" role="button" tabindex="0">clear</a></div>
+        <div class="chips" id="cats"></div>
+        <div class="subtle">Shows the whole track of any storm that reached the selected category at any point.</div>
+      </div>
+
+      <div class="count"><b id="stormCount">—</b> storms match</div>
+    </div>
+
+    <!-- ── Block B: El Niño episodes and their monthly chart (self-contained) ── -->
+    <div class="sec epi-block">
+      <div class="lbl">El Niño episodes · Cat 3+ storms</div>
+      <div id="epiLayerList"></div>
+
+      <div class="field" style="margin-top:14px">
+        <div class="lbl" style="margin-bottom:6px">Basin</div>
+        <div class="chips" id="epiBasins"></div>
+      </div>
+
+      <div class="lbl" style="margin-top:16px">Cyclones by month <b id="epiTotal"></b></div>
+      <div class="hist" id="epiHist"></div>
+      <div class="mlabels"><span>J</span><span>F</span><span>M</span><span>A</span><span>M</span><span>J</span><span>J</span><span>A</span><span>S</span><span>O</span><span>N</span><span>D</span></div>
+      <div class="subtle" id="epiHint">Enable an episode above to see its monthly cyclone counts.</div>
+      <div class="subtle">Complete Cat 3+ tracks — not affected by the filters above.</div>
+    </div>
+
+    <div class="sec">
+      <div class="source" id="source">IBTrACS v04r01, NOAA NCEI</div>
+    </div>
+  </aside>
+
+  <div id="resizer" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
+
+  <div id="map">
+    <button class="method-btn" id="methodBtn" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h6v16H6a2 2 0 0 0-2 2V5z"/><path d="M20 5a2 2 0 0 0-2-2h-6v16h6a2 2 0 0 1 2 2V5z"/></svg>
+      Methodology
+    </button>
+    <div id="status">Loading track data…</div>
+    <div id="detail">
+      <div class="top"><span class="nm" id="dName">—</span><button class="x ti" id="dClose" aria-label="Close">✕</button></div>
+      <div class="tags" id="dTags"></div>
+      <table id="dTable"></table>
+      <div class="note" id="dNote">Provisional track — pre-reanalysis, subject to revision.</div>
+    </div>
+  </div>
+
+  <div class="modal" id="methodModal" role="dialog" aria-modal="true" aria-labelledby="methodTitle">
+    <div class="modal-panel">
+      <button class="modal-close" id="methodClose" aria-label="Close methodology">✕</button>
+      <div class="modal-eyebrow">Methodology</div>
+      <h2 class="modal-title" id="methodTitle">How this map is made</h2>
+      <p class="modal-lead">An exploratory prototype tool.</p>
+
+      <p>Tracks come from <b>IBTrACS v04r01</b> (NOAA NCEI) — the merged global best-track
+      archive that combines the world's tropical-cyclone warning centres into one dataset.
+      The main layer covers seasons <b>2015–2026</b>; every line segment is one best-track
+      fix, and provisional (pre-reanalysis) recent seasons are kept and flagged.</p>
+
+      <p>Intensity is coloured on the <b>Saffir–Simpson scale</b> from the US agency values
+      (<code>USA_SSHS</code> / <code>USA_WIND</code>) — 1-minute sustained wind in knots.
+      Those are used because they are globally consistent; agencies report over different
+      wind-averaging periods, so values are never mixed. Year and month are read from each
+      fix's timestamp, not the meteorological season label.</p>
+
+      <p>The <b>year, month, basin, name and intensity filters work per storm</b>: if any
+      part of a track meets a filter, the <b>whole track</b> is shown. So choosing Category 5
+      draws the complete path of every storm that reached Cat 5 at any point — including its
+      weaker genesis and decay stages.</p>
+
+      <p>The <b>El Niño layers</b> isolate the strong and very-strong episodes since 1980
+      (ranked by NOAA CPC's Oceanic Niño Index). Each shows storms that reached
+      <b>Category 3+</b> during that episode's two seasons, drawn as complete tracks; the
+      monthly chart tallies those storms for whichever episode layers you enable.</p>
+
+      <div class="modal-sub">Key terms</div>
+      <div class="modal-cards">
+        <div class="modal-card"><h4>Track fixes</h4><p>Count of best-track position records for a storm — one per ~6-hourly time step. This is the "Track fixes" figure in the storm card.</p></div>
+        <div class="modal-card"><h4>Category</h4><p>Saffir–Simpson class from <code>USA_SSHS</code>, based on 1-min sustained wind. TD/TS are pre-hurricane stages.</p></div>
+        <div class="modal-card"><h4>Landfall</h4><p>First fix flagged <code>LANDFALL = 0</code> — the storm centre reaches land within the next 6 hours.</p></div>
+        <div class="modal-card"><h4>Provisional</h4><p>Recent seasons are published before reanalysis and may be revised. Flagged on the storm card.</p></div>
+      </div>
+
+      <div class="modal-src">Sources: IBTrACS v04r01, NOAA NCEI · El Niño ranking: NOAA CPC Oceanic Niño Index (ONI) · Basemaps: Esri, CARTO, OpenStreetMap. Geometries are cut at the 180° meridian so Pacific tracks don't wrap across the map.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════════════════════════════════
+// Web slice of the since1980 archive (seasons 2015–2026). Regenerate with:
+//   python pipeline/preprocess_ibtracs.py --min-season 2015 --formats geojson
+const DATA_URL = './data/IBTrACS.since1980.list.v04r01.lines.2015plus.geojson';
+
+// Esri Light Gray Canvas — raster XYZ tiles, so it needs a full inline style spec
+// (base + reference labels). Esri tiles are {z}/{y}/{x} order.
+const ESRI = 'https://services.arcgisonline.com/ArcGIS/rest/services';
+const ESRI_LIGHT = {
+  version: 8,
+  sources: {
+    'esri-base': { type:'raster', tileSize:256,
+      tiles:[ESRI + '/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}'],
+      attribution:'Tiles © Esri — Esri, DeLorme, NAVTEQ' },
+    'esri-ref':  { type:'raster', tileSize:256,
+      tiles:[ESRI + '/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}'] },
+  },
+  layers: [
+    { id:'esri-base', type:'raster', source:'esri-base' },
+    { id:'esri-ref',  type:'raster', source:'esri-ref' },
+  ],
+};
+
+const BASEMAPS = {
+  'esri-light':  { label: 'Esri Light Grey',         style: ESRI_LIGHT },
+  'carto-grey':  { label: 'Carto Grey (Positron)',   style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json' },
+  'osm-voyager': { label: 'OSM light (Voyager)',     style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json' },
+};
+const DEFAULT_BASEMAP = 'esri-light';
+
+// Saffir–Simpson categories — data colours (a sequential intensity ramp), kept
+// distinct from the OCHA brand palette which styles the app chrome.
+const CATS = [
+  { key:'un', label:'—',  name:'Unknown',             vals:[-5,-4,-3,-2], color:'#9aa0a6' },
+  { key:'td', label:'TD', name:'Tropical depression', vals:[-1],          color:'#5ebaff' },
+  { key:'ts', label:'TS', name:'Tropical storm',      vals:[0],           color:'#00faf4' },
+  { key:'c1', label:'1',  name:'Category 1',          vals:[1],           color:'#ffe775' },
+  { key:'c2', label:'2',  name:'Category 2',          vals:[2],           color:'#ffc140' },
+  { key:'c3', label:'3',  name:'Category 3',          vals:[3],           color:'#ff8f20' },
+  { key:'c4', label:'4',  name:'Category 4',          vals:[4],           color:'#ff6060' },
+  { key:'c5', label:'5',  name:'Category 5',          vals:[5],           color:'#c00000' },
+];
+const SSHS_COLOR = ['step', ['get','USA_SSHS'],
+  '#9aa0a6', -1,'#5ebaff', 0,'#00faf4', 1,'#ffe775', 2,'#ffc140', 3,'#ff8f20', 4,'#ff6060', 5,'#c00000'];
+const SSHS_WIDTH = ['step', ['get','USA_SSHS'], 0.9, 4, 1.8, 5, 2.6];
+const EPISODE_PAINT = { 'line-color': SSHS_COLOR, 'line-width': SSHS_WIDTH };
+const HIT_PAINT = { 'line-color': '#000', 'line-opacity': 0, 'line-width': 12 };
+
+// ─────────────────────────────────────────────────────────────────────────
+//  LAYER REGISTRY — single source of truth (loop builds sources + the tree).
+// ─────────────────────────────────────────────────────────────────────────
+const LAYERS = [
+  {
+    id: 'tracks', label: 'Cyclone tracks',
+    type: 'geojson-line', url: DATA_URL, visible: true,
+    swatch: { kind:'bar', color:'#ff8f20' }, legendKind: 'sshs',
+    paint: { 'line-color': SSHS_COLOR, 'line-width': SSHS_WIDTH },
+    filterable: true,
+  },
+
+  // El Niño episodes — Cat 3+ storms, complete tracks, graded like the main layer.
+  // Row labels are short (period · ONI); the section header carries "El Niño · Cat 3+".
+  { id:'elnino-2023', label:'2023–24 · ONI 2.0',
+    group:'elnino', period:'2023–24', type:'geojson-line', visible:false,
+    url:'./data/IBTrACS.elnino.2023-24.cat3plus.geojson',
+    swatch:{kind:'ramp'}, legendKind:'sshs', paint:EPISODE_PAINT },
+  { id:'elnino-2015', label:'2015–16 · ONI 2.6',
+    group:'elnino', period:'2015–16', type:'geojson-line', visible:false,
+    url:'./data/IBTrACS.elnino.2015-16.cat3plus.geojson',
+    swatch:{kind:'ramp'}, legendKind:'sshs', paint:EPISODE_PAINT },
+  { id:'elnino-2009', label:'2009–10 · ONI 1.6',
+    group:'elnino', period:'2009–10', type:'geojson-line', visible:false,
+    url:'./data/IBTrACS.elnino.2009-10.cat3plus.geojson',
+    swatch:{kind:'ramp'}, legendKind:'sshs', paint:EPISODE_PAINT },
+  { id:'elnino-1997', label:'1997–98 · ONI 2.4',
+    group:'elnino', period:'1997–98', type:'geojson-line', visible:false,
+    url:'./data/IBTrACS.elnino.1997-98.cat3plus.geojson',
+    swatch:{kind:'ramp'}, legendKind:'sshs', paint:EPISODE_PAINT },
+  { id:'elnino-1991', label:'1991–92 · ONI 1.7',
+    group:'elnino', period:'1991–92', type:'geojson-line', visible:false,
+    url:'./data/IBTrACS.elnino.1991-92.cat3plus.geojson',
+    swatch:{kind:'ramp'}, legendKind:'sshs', paint:EPISODE_PAINT },
+  { id:'elnino-1987', label:'1987–88 · ONI 1.7',
+    group:'elnino', period:'1987–88', type:'geojson-line', visible:false,
+    url:'./data/IBTrACS.elnino.1987-88.cat3plus.geojson',
+    swatch:{kind:'ramp'}, legendKind:'sshs', paint:EPISODE_PAINT },
+  { id:'elnino-1982', label:'1982–83 · ONI 2.2',
+    group:'elnino', period:'1982–83', type:'geojson-line', visible:false,
+    url:'./data/IBTrACS.elnino.1982-83.cat3plus.geojson',
+    swatch:{kind:'ramp'}, legendKind:'sshs', paint:EPISODE_PAINT },
+
+  // ===== TEMPLATES — uncomment one, give it a url + paint, done =====
+  // { id:'reports', label:'Impact reports', type:'csv-points',
+  //   url:'https://docs.google.com/.../pub?output=csv', latField:'lat', lonField:'lon',
+  //   live:true, refreshSec:300, visible:false, swatch:{kind:'dot', color:'#0077B8'},
+  //   paint:{'circle-radius':5,'circle-color':'#0077B8','circle-stroke-width':1,'circle-stroke-color':'#fff'},
+  //   popupFields:['location','people_affected','date'] },
+  // { id:'stations', label:'Stations', type:'geojson-points', url:'./data/stations.geojson',
+  //   visible:false, swatch:{kind:'dot', color:'#27833A'}, paint:{'circle-radius':4,'circle-color':'#27833A'} },
+  // { id:'exposure', label:'Exposure zones', type:'geojson-polygon', url:'./data/exposure.geojson',
+  //   visible:false, swatch:{kind:'dot', color:'#A05FB4'}, paint:{'fill-color':'#A05FB4','fill-opacity':0.3},
+  //   outline:{'line-color':'#733D96','line-width':1} },
+  // { id:'sst', label:'Sea-surface temp', type:'raster-xyz', url:'https://example.com/{z}/{x}/{y}.png',
+  //   tileSize:256, opacity:0.8, visible:false, attribution:'© provider' },
+  // { id:'archive', label:'Full archive (PMTiles)', type:'pmtiles',
+  //   url:'https://example.com/ibtracs_full.pmtiles', sourceLayer:'tracks', geom:'line',
+  //   visible:false, paint:{'line-color':'#999','line-width':1} },
+];
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════════════════
+let DATA = null;                 // main FeatureCollection
+const LAYER_DATA = {};           // layer id -> FeatureCollection (all line layers, in JS)
+let SUMMARIES = {};              // SID -> unified storm summary (main + episode-only)
+let selectedSID = null;
+const layerIds = {};             // cfg.id -> [maplibre layer ids] for visibility toggling
+const lineLayers = [];           // ids of geojson-line layers (get selection + highlight)
+const hitLayers = new Set();     // '<id>-hit' layers, for empty-click detection
+const EPI_STORMS = {};           // episode id -> [{basin, months:[…]}] per distinct storm
+let EPI_BASINS = [];             // basins present across episodes (for the chips)
+const epiBasins = new Set();     // episode-block basin filter (independent of main filters)
+const filterState = { basins:new Set(), yearLo:null, yearHi:null, name:'',
+                      cats:new Set(), monthLo:1, monthHi:12 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MAP
+// ═══════════════════════════════════════════════════════════════════════════
+const map = new maplibregl.Map({
+  container: 'map',
+  style: BASEMAPS[DEFAULT_BASEMAP].style,
+  center: [138, 8], zoom: 2.3,
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch:false }), 'top-right');
+map.addControl(new maplibregl.ScaleControl({ maxWidth:120, unit:'metric' }), 'bottom-right');
+
+function ensureOverlays(){
+  if (!DATA || map.getLayer('tracks')) return;
+  try { buildOverlays(); } catch (e) { /* style not parsed yet — retry on next styledata */ }
+}
+map.on('styledata', ensureOverlays);
+boot();
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  BOOT — load every line layer's data into JS (registry in package mode, else fetch)
+// ═══════════════════════════════════════════════════════════════════════════
+async function loadOne(cfg){
+  if (window.CYCLONE_DATA && window.CYCLONE_DATA[cfg.id]) return window.CYCLONE_DATA[cfg.id];
+  const res = await fetch(cfg.url);
+  if (!res.ok) throw new Error(cfg.id + ' HTTP ' + res.status);
+  return res.json();
+}
+async function boot(){
+  try {
+    const lines = LAYERS.filter(c => c.type === 'geojson-line');
+    await Promise.all(lines.map(async c => { LAYER_DATA[c.id] = await loadOne(c); }));
+    DATA = LAYER_DATA['tracks'];
+  } catch (err) {
+    document.getElementById('status').innerHTML =
+      'Could not load track data.<br>Serve this folder over http:// (see README) — file:// fetch is blocked.';
+    console.error(err); return;
+  }
+  computeDerived();
+  buildBasemapSwitcher();
+  buildLayerList();
+  buildFilters();
+  document.getElementById('status').style.display = 'none';
+  ensureOverlays();
+}
+
+// per-SID summaries (unified) + per-feature whole-track keys on the main layer.
+// Year and month come from ISO_TIME (the fix date), not the SEASON field.
+function computeDerived(){
+  const basins = new Set(), present = new Set(), seasons = new Set();
+
+  // --- pass 1: main layer drives filters, summaries, and per-storm sets ---
+  for (const f of DATA.features){
+    const p = f.properties;
+    if (p.BASIN) basins.add(p.BASIN);
+    if (p.USA_SSHS != null) present.add(+p.USA_SSHS);
+    if (p.SEASON != null) seasons.add(+p.SEASON);   // slider domain (2000–2026)
+    accum(p.SID, p, true);
+  }
+  // inject whole-track keys used by the map filters (read straight off summaries):
+  //  STORM_CATS / STORM_MONTHS = comma-guarded membership strings;
+  //  STORM_YMIN / STORM_YMAX  = the storm's ISO-year span (for range overlap).
+  for (const f of DATA.features){
+    const s = SUMMARIES[f.properties.SID];
+    f.properties.STORM_CATS   = ',' + [...s.cats].join(',') + ',';
+    f.properties.STORM_MONTHS = ',' + [...s.months].join(',') + ',';
+    f.properties.STORM_YMIN   = s.yearMin;
+    f.properties.STORM_YMAX   = s.yearMax;
+  }
+
+  // --- pass 2: episode layers — summaries for selection + a per-layer monthly
+  //     storm histogram for the El Niño chart (independent of the main filters) ---
+  const epiBasinSet = new Set();
+  for (const id in LAYER_DATA){
+    if (id === 'tracks') continue;
+    const bySid = {};
+    for (const f of LAYER_DATA[id].features){
+      const p = f.properties, sid = p.SID;
+      if (!(SUMMARIES[sid] && SUMMARIES[sid].main)) accum(sid, p, false);
+      let r = bySid[sid];
+      if (!r) r = bySid[sid] = { basin: p.BASIN, months: new Set() };   // genesis basin
+      if (p.ISO_TIME) r.months.add(+p.ISO_TIME.slice(5,7));
+    }
+    // inject the storm-level basin so the map can filter whole tracks by basin
+    for (const f of LAYER_DATA[id].features){ const r = bySid[f.properties.SID]; if (r) f.properties.STORM_BASIN = r.basin; }
+    EPI_STORMS[id] = Object.values(bySid).map(r => ({ basin: r.basin, months: [...r.months] }));
+    Object.values(bySid).forEach(r => { if (r.basin) epiBasinSet.add(r.basin); });
+  }
+  EPI_BASINS = [...epiBasinSet].sort();
+
+  computeDerived.basins = [...basins].sort();
+  computeDerived.present = present;
+  // slider domain from SEASON so the label reads 2000–2026; filtering still uses
+  // each storm's ISO-year span (STORM_YMIN/YMAX), which can dip to Dec of the prior year.
+  const sarr = [...seasons];
+  const yMin = Math.min(...sarr), yMax = Math.max(...sarr);
+  computeDerived.yMin = yMin; computeDerived.yMax = yMax;
+  document.getElementById('sideTitle').textContent = `IBTrACS best-track: ${yMin}–${yMax}`;
+}
+
+function accum(sid, p, isMain){
+  let s = SUMMARIES[sid];
+  if (!s){ s = SUMMARIES[sid] = { sid, name:p.NAME, basin:p.BASIN,
+           maxSSHS:-99, maxWind:-99, minPres:1e9, t0:null, t1:null, n:0, prov:false,
+           main:isMain, cats:new Set(), months:new Set(), yearMin:Infinity, yearMax:-Infinity,
+           landfall:null }; }
+  s.n++;
+  if (+p.PROVISIONAL === 1) s.prov = true;
+  // earliest fix flagged as landfall (IBTrACS LANDFALL == 0 = at land within 6 h)
+  if (p.LANDFALL != null && +p.LANDFALL === 0 && p.ISO_TIME &&
+      (!s.landfall || p.ISO_TIME < s.landfall)) s.landfall = p.ISO_TIME;
+  if (p.USA_SSHS != null){ const v = +p.USA_SSHS; s.maxSSHS = Math.max(s.maxSSHS, v); s.cats.add(v); }
+  if (p.USA_WIND != null) s.maxWind = Math.max(s.maxWind, +p.USA_WIND);
+  if (p.WMO_PRES != null && !isNaN(p.WMO_PRES)) s.minPres = Math.min(s.minPres, +p.WMO_PRES);
+  if (p.ISO_TIME){
+    if (!s.t0 || p.ISO_TIME < s.t0) s.t0 = p.ISO_TIME;
+    if (!s.t1 || p.ISO_TIME > s.t1) s.t1 = p.ISO_TIME;
+    s.yearMin = Math.min(s.yearMin, +p.ISO_TIME.slice(0,4));
+    s.yearMax = Math.max(s.yearMax, +p.ISO_TIME.slice(0,4));
+    s.months.add(+p.ISO_TIME.slice(5,7));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  OVERLAYS
+// ═══════════════════════════════════════════════════════════════════════════
+function buildOverlays(){
+  for (const cfg of LAYERS){
+    switch (cfg.type){
+      case 'geojson-line':    addLine(cfg); break;
+      case 'geojson-points':  addSimple(cfg, 'circle'); break;
+      case 'geojson-symbol':  addSimple(cfg, 'symbol'); break;
+      case 'geojson-polygon': addPolygon(cfg); break;
+      case 'geojson-heatmap': addSimple(cfg, 'heatmap'); break;
+      case 'csv-points':      addCsvPoints(cfg); break;
+      case 'raster-xyz':
+      case 'raster-wms':      addRaster(cfg); break;
+      case 'vector-tiles':    addVector(cfg, false); break;
+      case 'pmtiles':         addVector(cfg, true); break;
+      case 'image':           addImage(cfg); break;
+      default: console.warn('Unknown layer type:', cfg.type);
+    }
+    if (cfg.type !== 'geojson-line') applyVisibility(cfg);
+  }
+  applyFilter();
+  applyHighlight();
+  applyEpisodeBasin();   // reapply the episode basin filter after a style reload
+}
+
+// every line layer (main + episodes) gets the SAME stack: coloured line, white
+// highlight casing + coloured highlight (filtered to the selected storm), and an
+// invisible wide hit line for easy hover/click. So episodes share the main layer's
+// tooltip and click-to-highlight-whole-storm behaviour.
+function addLine(cfg){
+  const id = cfg.id, src = id + '-src';
+  if (!map.getSource(src)) map.addSource(src, { type:'geojson', data: LAYER_DATA[id] });
+  const add = (lid, paint, extra) => { if (!map.getLayer(lid)) map.addLayer(Object.assign(
+      { id:lid, type:'line', source:src, layout:{ 'line-join':'round','line-cap':'round' }, paint }, extra)); };
+  add(id, cfg.paint);
+  add(id+'-hlc', { 'line-color':'#ffffff', 'line-width':5 }, { filter:['==',['get','SID'],'__none__'] });
+  add(id+'-hl',  { 'line-color': SSHS_COLOR, 'line-width':2.6 }, { filter:['==',['get','SID'],'__none__'] });
+  add(id+'-hit', HIT_PAINT);
+  layerIds[id] = [id, id+'-hlc', id+'-hl', id+'-hit'];
+  if (!lineLayers.includes(id)) lineLayers.push(id);
+  hitLayers.add(id+'-hit');
+  wireInteractions(id+'-hit');
+  applyVisibility(cfg);
+}
+
+function sourceData(cfg){ return (window.CYCLONE_DATA && window.CYCLONE_DATA[cfg.id]) || cfg.url; }
+function addSimple(cfg, geom){
+  const src = cfg.id + '-src';
+  if (!map.getSource(src)) map.addSource(src, { type:'geojson', data: sourceData(cfg) });
+  if (!map.getLayer(cfg.id)) map.addLayer({ id:cfg.id, type:geom, source:src,
+      layout: cfg.layout || {}, paint: cfg.paint || {} });
+  layerIds[cfg.id] = [cfg.id];
+  wirePopup(cfg, cfg.id);
+}
+function addPolygon(cfg){
+  const src = cfg.id + '-src';
+  if (!map.getSource(src)) map.addSource(src, { type:'geojson', data: sourceData(cfg) });
+  if (!map.getLayer(cfg.id)) map.addLayer({ id:cfg.id, type:'fill', source:src, paint: cfg.paint || {} });
+  const outId = cfg.id + '-outline';
+  if (cfg.outline && !map.getLayer(outId)) map.addLayer({ id:outId, type:'line', source:src, paint: cfg.outline });
+  layerIds[cfg.id] = cfg.outline ? [cfg.id, outId] : [cfg.id];
+  wirePopup(cfg, cfg.id);
+}
+async function addCsvPoints(cfg){
+  const src = cfg.id + '-src';
+  const load = async () => {
+    const text = await (await fetch(cfg.url)).text();
+    map.getSource(src).setData(csvToGeojson(text, cfg.latField, cfg.lonField));
+  };
+  if (!map.getSource(src)) map.addSource(src, { type:'geojson', data:{ type:'FeatureCollection', features:[] } });
+  if (!map.getLayer(cfg.id)) map.addLayer({ id:cfg.id, type:'circle', source:src, paint: cfg.paint || {} });
+  layerIds[cfg.id] = [cfg.id];
+  wirePopup(cfg, cfg.id);
+  load();
+  if (cfg.live && cfg.refreshSec) setInterval(load, cfg.refreshSec * 1000);
+}
+function addRaster(cfg){
+  const src = cfg.id + '-src';
+  if (!map.getSource(src)) map.addSource(src, { type:'raster', tiles:[cfg.url], tileSize:cfg.tileSize||256, attribution: cfg.attribution || '' });
+  if (!map.getLayer(cfg.id)) map.addLayer({ id:cfg.id, type:'raster', source:src, paint:{ 'raster-opacity': cfg.opacity != null ? cfg.opacity : 1 } });
+  layerIds[cfg.id] = [cfg.id];
+}
+function addVector(cfg, isPmtiles){
+  const src = cfg.id + '-src';
+  if (isPmtiles && window.pmtiles && !addVector._protoAdded){
+    maplibregl.addProtocol('pmtiles', new pmtiles.Protocol().tile); addVector._protoAdded = true;
+  }
+  if (!map.getSource(src)) map.addSource(src, isPmtiles ? { type:'vector', url:'pmtiles://' + cfg.url } : { type:'vector', tiles:[cfg.url] });
+  if (!map.getLayer(cfg.id)) map.addLayer({ id:cfg.id, type:cfg.geom||'line', source:src, 'source-layer': cfg.sourceLayer, paint: cfg.paint || {} });
+  layerIds[cfg.id] = [cfg.id];
+  wirePopup(cfg, cfg.id);
+}
+function addImage(cfg){
+  const src = cfg.id + '-src';
+  if (!map.getSource(src)) map.addSource(src, { type:'image', url:cfg.url, coordinates:cfg.coordinates });
+  if (!map.getLayer(cfg.id)) map.addLayer({ id:cfg.id, type:'raster', source:src, paint:{ 'raster-opacity': cfg.opacity != null ? cfg.opacity : 1 } });
+  layerIds[cfg.id] = [cfg.id];
+}
+function csvToGeojson(text, latF, lonF){
+  const lines = text.trim().split(/\r?\n/), head = lines[0].split(',').map(s => s.trim());
+  const li = head.indexOf(latF), oi = head.indexOf(lonF), feats = [];
+  for (let i=1;i<lines.length;i++){
+    const c = lines[i].split(','), lat = parseFloat(c[li]), lon = parseFloat(c[oi]);
+    if (isNaN(lat) || isNaN(lon)) continue;
+    const props = {}; head.forEach((h,j)=>props[h]=(c[j]||'').trim());
+    feats.push({ type:'Feature', geometry:{ type:'Point', coordinates:[lon,lat] }, properties:props });
+  }
+  return { type:'FeatureCollection', features:feats };
+}
+function applyVisibility(cfg){
+  const v = cfg.visible ? 'visible' : 'none';
+  (layerIds[cfg.id] || []).forEach(id => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', v); });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  HOVER TOOLTIP + SELECTION (shared by every line layer)
+// ═══════════════════════════════════════════════════════════════════════════
+const hoverTip = new maplibregl.Popup({ closeButton:false, closeOnClick:false, offset:12, className:'tip' });
+let tipKey = null;
+function catFor(sshs){ return CATS.find(c => c.vals.includes(sshs)) || CATS[0]; }
+// ISO_TIME (YYYY-MM-DD …) → "22 Aug 2018"
+function fmtDate(iso){ if (!iso) return null; const d = iso.slice(0,10).split('-'); return `${+d[2]} ${MONTHS[+d[1]-1]} ${d[0]}`; }
+
+function tooltipHtml(p){
+  const name = (p.NAME && p.NAME !== 'NOT_NAMED') ? p.NAME : 'Unnamed system';
+  const cat  = catFor(+p.USA_SSHS);
+  const wind = (p.USA_WIND != null && p.USA_WIND !== '') ? `${Math.round(p.USA_WIND)} kt` : '—';
+  const s = SUMMARIES[p.SID];
+  const lf = s && s.landfall ? fmtDate(s.landfall) : null;   // storm-level landfall date
+  return `<div class="tip-name">${name}</div>` +
+         `<div class="tip-sub"><span class="dot" style="background:${cat.color}"></span>${cat.name} · ${wind}</div>` +
+         `<div class="tip-meta">${p.BASIN} · ${p.SEASON}</div>` +
+         `<div class="tip-meta">Landfall ${lf || 'none'}</div>`;
+}
+function wireInteractions(lid){
+  if (wireInteractions['_'+lid]) return;
+  wireInteractions['_'+lid] = true;
+  map.on('mousemove', lid, (e) => {
+    const p = e.features[0].properties, key = p.SID + '|' + p.ISO_TIME;
+    map.getCanvas().style.cursor = 'pointer';
+    hoverTip.setLngLat(e.lngLat);
+    if (key !== tipKey){ tipKey = key; hoverTip.setHTML(tooltipHtml(p)); }
+    if (!hoverTip.isOpen()) hoverTip.addTo(map);
+  });
+  map.on('mouseleave', lid, () => { map.getCanvas().style.cursor = ''; tipKey = null; hoverTip.remove(); });
+  map.on('click', lid, (e) => selectSID(e.features[0].properties.SID));
+}
+map.on('click', (e) => {
+  const hit = [...hitLayers].some(l => map.getLayer(l) && map.queryRenderedFeatures(e.point, { layers:[l] }).length);
+  if (!hit) clearSelection();
+});
+
+// popup for non-line template layers (points/polygons)
+function wirePopup(cfg, lid){
+  if (!cfg.popupFields || wirePopup['_'+cfg.id]) return;
+  wirePopup['_'+cfg.id] = true;
+  map.on('click', lid, (e) => {
+    const p = e.features[0].properties;
+    new maplibregl.Popup().setLngLat(e.lngLat)
+      .setHTML(cfg.popupFields.map(k => `<b>${k}</b>: ${p[k]}`).join('<br>')).addTo(map);
+  });
+  map.on('mouseenter', lid, () => map.getCanvas().style.cursor='pointer');
+  map.on('mouseleave', lid, () => map.getCanvas().style.cursor='');
+}
+
+function selectSID(sid){
+  selectedSID = sid;
+  applyHighlight();
+  const s = SUMMARIES[sid]; if (!s) return;
+  const cat = catFor(s.maxSSHS);
+  const days = (s.t0 && s.t1) ? ((new Date(s.t1) - new Date(s.t0)) / 86400000) : null;
+  const yr = s.yearMin === s.yearMax ? s.yearMin : `${s.yearMin}–${s.yearMax}`;
+  document.getElementById('dName').textContent = (s.name && s.name !== 'NOT_NAMED') ? s.name : 'Unnamed system';
+  document.getElementById('dTags').innerHTML =
+    `<span class="tag">${s.basin} · ${yr}</span>` +
+    `<span class="tag"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;` +
+    `background:${cat.color};margin-right:5px;vertical-align:1px"></span>${cat.name}</span>` +
+    (s.prov ? `<span class="tag" style="background:#FAE7CD;color:#854f0b">provisional</span>` : '');
+  const rows = [
+    ['Peak intensity', cat.name],
+    ['Peak wind', s.maxWind > -99 ? Math.round(s.maxWind) + ' kt' : '—'],
+    ['Min pressure', s.minPres < 1e9 ? Math.round(s.minPres) + ' hPa' : '—'],
+    ['Landfall', s.landfall ? fmtDate(s.landfall) : 'none'],
+    ['Duration', days != null ? days.toFixed(1) + ' days' : '—'],
+    ['Track fixes', s.n],
+  ];
+  document.getElementById('dTable').innerHTML =
+    rows.map(([k,v]) => `<tr><td class="k">${k}</td><td class="v">${v}</td></tr>`).join('');
+  document.getElementById('dNote').style.display = s.prov ? 'block' : 'none';
+  document.getElementById('detail').style.display = 'block';
+}
+function clearSelection(){ selectedSID = null; applyHighlight(); document.getElementById('detail').style.display = 'none'; }
+document.getElementById('dClose').onclick = clearSelection;
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  FILTERS  (main layer only; whole-track semantics for intensity + month)
+// ═══════════════════════════════════════════════════════════════════════════
+function buildFilter(){
+  const s = filterState, f = ['all'];
+  if (s.basins.size) f.push(['in', ['get','BASIN'], ['literal', [...s.basins]]]);
+  // whole-track year: keep any storm whose ISO-year span overlaps the range
+  f.push(['<=', ['get','STORM_YMIN'], s.yearHi]);
+  f.push(['>=', ['get','STORM_YMAX'], s.yearLo]);
+  if (s.name) f.push(['in', s.name.toUpperCase(), ['upcase', ['coalesce', ['get','NAME'], '']]]);
+  if (s.cats.size){
+    const any = ['any'];
+    s.cats.forEach(v => any.push(['in', ',' + v + ',', ['coalesce', ['get','STORM_CATS'], '']]));
+    f.push(any);
+  }
+  if (!(s.monthLo === 1 && s.monthHi === 12)){
+    const any = ['any'];
+    for (let m = s.monthLo; m <= s.monthHi; m++) any.push(['in', ',' + m + ',', ['coalesce', ['get','STORM_MONTHS'], '']]);
+    f.push(any);
+  }
+  return f;
+}
+function applyMapFilter(){
+  const f = buildFilter();
+  ['tracks','tracks-hit'].forEach(id => { if (map.getLayer(id)) map.setFilter(id, f); });
+}
+// immediate — for chips / basin / name / reset
+function applyFilter(){ applyMapFilter(); refreshStats(); }
+// live — for the sliders: update the cheap readouts (labels, histogram, count)
+// every input, but debounce the expensive setFilter over 162k features so a drag
+// doesn't re-tile the layer on every pixel.
+let _mfTimer = null;
+function applyFilterLive(){ refreshStats(); clearTimeout(_mfTimer); _mfTimer = setTimeout(applyMapFilter, 90); }
+function applyHighlight(){
+  const f = ['==', ['get','SID'], selectedSID || '__none__'];
+  lineLayers.forEach(id => ['-hl','-hlc'].forEach(sfx => { if (map.getLayer(id+sfx)) map.setFilter(id+sfx, f); }));
+}
+
+// storm count (all filters) + month histogram (all filters except month), from
+// the per-SID summaries — fast (~1–2k storms) so it recomputes on every change.
+function refreshStats(){
+  const s = filterState, hist = new Array(13).fill(0); let count = 0;
+  for (const sid in SUMMARIES){
+    const st = SUMMARIES[sid];
+    if (!st.main) continue;
+    if (s.basins.size && !s.basins.has(st.basin)) continue;
+    if (st.yearMax < s.yearLo || st.yearMin > s.yearHi) continue;   // year-span overlap
+    if (s.name && !(st.name||'').toUpperCase().includes(s.name.toUpperCase())) continue;
+    if (s.cats.size && ![...st.cats].some(c => s.cats.has(c))) continue;
+    let inRange = false;
+    st.months.forEach(m => { hist[m]++; if (m >= s.monthLo && m <= s.monthHi) inRange = true; });
+    if (inRange) count++;
+  }
+  document.getElementById('stormCount').textContent = count.toLocaleString();
+  renderHist(hist);
+}
+function renderHist(hist){
+  const max = Math.max(1, ...hist.slice(1));
+  const box = document.getElementById('monthHist');
+  box.innerHTML = '';
+  for (let m = 1; m <= 12; m++){
+    const bar = document.createElement('div');
+    bar.className = 'bar' + (m >= filterState.monthLo && m <= filterState.monthHi ? ' sel' : '');
+    bar.style.height = Math.round(100 * hist[m] / max) + '%';
+    bar.title = hist[m] + ' storms';
+    box.appendChild(bar);
+  }
+}
+
+// El Niño monthly chart — sums the per-layer histograms of the ENABLED episode
+// layers (episodes hold distinct storms, so no cross-layer dedup needed).
+function renderEpisodeChart(){
+  const combined = new Array(13).fill(0); let total = 0, anyOn = false;
+  for (const cfg of LAYERS){
+    if (cfg.group !== 'elnino' || !cfg.visible) continue;
+    anyOn = true;
+    for (const st of (EPI_STORMS[cfg.id] || [])){
+      if (epiBasins.size && !epiBasins.has(st.basin)) continue;   // episode basin filter
+      total++;
+      st.months.forEach(m => combined[m]++);
+    }
+  }
+  const box = document.getElementById('epiHist');
+  const max = Math.max(1, ...combined.slice(1));
+  box.innerHTML = '';
+  for (let m = 1; m <= 12; m++){
+    const bar = document.createElement('div');
+    bar.className = 'bar sel';
+    bar.style.height = Math.round(100 * combined[m] / max) + '%';
+    bar.title = combined[m] + ' storms';
+    box.appendChild(bar);
+  }
+  box.style.display = anyOn ? 'flex' : 'none';
+  document.getElementById('epiHint').style.display = anyOn ? 'none' : 'block';
+  document.getElementById('epiTotal').textContent = anyOn ? total.toLocaleString() + ' storms' : '';
+}
+
+// Episode-block basin filter → constrains the episode map layers (whole track, by
+// genesis basin) and the monthly chart. Independent of the main-layer filters.
+function applyEpisodeBasin(){
+  const f = epiBasins.size ? ['in', ['get','STORM_BASIN'], ['literal', [...epiBasins]]] : null;
+  for (const cfg of LAYERS){
+    if (cfg.group !== 'elnino') continue;
+    ['', '-hit'].forEach(sfx => { const lid = cfg.id + sfx; if (map.getLayer(lid)) map.setFilter(lid, f); });
+  }
+  renderEpisodeChart();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  UI BUILDERS
+// ═══════════════════════════════════════════════════════════════════════════
+function buildBasemapSwitcher(){
+  const sel = document.getElementById('basemap');
+  sel.innerHTML = Object.entries(BASEMAPS).map(([k,b]) => `<option value="${k}">${b.label}</option>`).join('');
+  sel.value = DEFAULT_BASEMAP;
+  sel.onchange = () => map.setStyle(BASEMAPS[sel.value].style);   // OCHA token baked in
+}
+
+function legendHtml(cfg){
+  const note = cfg.period
+    ? `<div class="leg-note">Only storms that peaked at <b>Cat 3+</b> during ${cfg.period}. ` +
+      `The entire track is drawn, so weaker genesis and decay stages appear too.</div>`
+    : '';
+  let items;
+  if (cfg.legendKind === 'sshs')
+    items = CATS.filter(c => c.vals.some(v => computeDerived.present.has(v))).map(c => ({ color:c.color, label:c.name }));
+  else
+    items = [{ color: (cfg.swatch && cfg.swatch.color) || '#888', label: cfg.label }];
+  return note + items.map(i => `<div class="leg-row"><span class="dot" style="background:${i.color}"></span>${i.label}</div>`).join('');
+}
+function buildLayerRow(cfg){
+  const sw = !cfg.swatch ? ''
+    : cfg.swatch.kind === 'ramp'
+      ? `<span class="sw" style="background:linear-gradient(90deg,${CATS.map(c=>c.color).join(',')})"></span>`
+      : cfg.swatch.kind === 'bar'
+        ? `<span class="sw" style="background:${cfg.swatch.color}"></span>`
+        : `<span class="swc" style="background:${cfg.swatch.color}"></span>`;
+  const wrap = document.createElement('div');
+  wrap.innerHTML =
+    `<div class="layer"><span class="chev">▶</span>` +
+    `<input type="checkbox" ${cfg.visible ? 'checked':''}>${sw}` +
+    `<span class="nm">${cfg.label}</span>` + (cfg.live ? '<span class="badge">live</span>' : '') + `</div>` +
+    `<div class="layer-body">${legendHtml(cfg)}</div>`;
+  const chev = wrap.querySelector('.chev'), body = wrap.querySelector('.layer-body');
+  const toggleOpen = () => { chev.classList.toggle('open'); body.classList.toggle('open'); };
+  chev.onclick = toggleOpen;
+  wrap.querySelector('.nm').onclick = toggleOpen;
+  wrap.querySelector('input').onchange = (e) => {
+    cfg.visible = e.target.checked; applyVisibility(cfg);
+    if (cfg.group === 'elnino') renderEpisodeChart();   // chart reflects enabled episodes
+  };
+  return wrap;
+}
+function buildLayerList(){
+  // main layer(s) sit in their own block (with the filters); grouped layers
+  // (El Niño episodes) sit in their own block (with the monthly chart).
+  const mainBox = document.getElementById('mainLayerList'); mainBox.innerHTML = '';
+  const epiBox  = document.getElementById('epiLayerList');  epiBox.innerHTML  = '';
+  for (const cfg of LAYERS) (cfg.group ? epiBox : mainBox).appendChild(buildLayerRow(cfg));
+
+  // episode-block basin filter chips (multiselect, empty = all)
+  const eb = document.getElementById('epiBasins'); eb.innerHTML = '';
+  for (const b of EPI_BASINS){
+    const el = document.createElement('span'); el.className = 'chip'; el.textContent = b;
+    el.onclick = () => {
+      const on = el.classList.toggle('on');
+      on ? epiBasins.add(b) : epiBasins.delete(b);
+      applyEpisodeBasin();
+    };
+    eb.appendChild(el);
+  }
+
+  const firstMain = mainBox.querySelector('.layer-body');   // open the tracks legend by default
+  if (firstMain) firstMain.previousElementSibling.querySelector('.chev').click();
+  renderEpisodeChart();   // initial (no episodes on → shows hint)
+}
+
+// dual-handle range slider bound to one .rng element
+function makeRange(el, min, max, lo, hi, onChange){
+  const inLo = el.querySelector('.rng-lo'), inHi = el.querySelector('.rng-hi'), fill = el.querySelector('.rng-fill');
+  [inLo, inHi].forEach(i => { i.min = min; i.max = max; i.step = 1; });
+  inLo.value = lo; inHi.value = hi;
+  const paint = () => {
+    const a = +inLo.value, b = +inHi.value, span = (max - min) || 1;
+    fill.style.left  = (100 * (a - min) / span) + '%';
+    fill.style.width = (100 * (b - a) / span) + '%';
+  };
+  const handler = (which) => () => {
+    let a = +inLo.value, b = +inHi.value;
+    if (a > b){ if (which === 'lo') inHi.value = a, b = a; else inLo.value = b, a = b; }
+    paint(); onChange(+inLo.value, +inHi.value);
+  };
+  inLo.oninput = handler('lo'); inHi.oninput = handler('hi');
+  paint();
+  return { set:(a,b)=>{ inLo.value=a; inHi.value=b; paint(); } };
+}
+
+let yearSlider, monthSlider;
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function fmtYears(){ document.getElementById('yearVals').textContent = `${filterState.yearLo}–${filterState.yearHi}`; }
+function fmtMonths(){
+  const a = filterState.monthLo, b = filterState.monthHi;
+  document.getElementById('monthVals').textContent = a === b ? MONTHS[a-1] : `${MONTHS[a-1]}–${MONTHS[b-1]}`;
+}
+
+function buildFilters(){
+  // Basin — multiselect chips (empty = all), same interaction as intensity
+  const basinBox = document.getElementById('basins'); basinBox.innerHTML = '';
+  for (const b of computeDerived.basins){
+    const el = document.createElement('span'); el.className = 'chip'; el.textContent = b;
+    el.onclick = () => {
+      const on = el.classList.toggle('on');
+      on ? filterState.basins.add(b) : filterState.basins.delete(b);
+      applyFilter();
+    };
+    basinBox.appendChild(el);
+  }
+
+  const y0 = computeDerived.yMin, y1 = computeDerived.yMax;
+  filterState.yearLo = y0; filterState.yearHi = y1;
+  yearSlider = makeRange(document.getElementById('yearRange'), y0, y1, y0, y1, (a,b) => {
+    filterState.yearLo = a; filterState.yearHi = b; fmtYears(); applyFilterLive();
+  });
+  fmtYears();
+
+  monthSlider = makeRange(document.getElementById('monthRange'), 1, 12, 1, 12, (a,b) => {
+    filterState.monthLo = a; filterState.monthHi = b; fmtMonths(); applyFilterLive();
+  });
+  fmtMonths();
+
+  const nameInput = document.getElementById('name');
+  nameInput.oninput = () => { filterState.name = nameInput.value.trim(); applyFilterLive(); };
+
+  const chips = document.getElementById('cats'); chips.innerHTML = '';
+  for (const c of CATS){
+    if (!c.vals.some(v => computeDerived.present.has(v))) continue;
+    const el = document.createElement('span'); el.className = 'chip';
+    el.innerHTML = `<span class="dot" style="background:${c.color}"></span>${c.label}`;
+    el.onclick = () => {
+      const on = el.classList.toggle('on');
+      c.vals.forEach(v => on ? filterState.cats.add(v) : filterState.cats.delete(v));
+      applyFilter();
+    };
+    chips.appendChild(el);
+  }
+  const clearCats = () => {
+    filterState.cats.clear();
+    chips.querySelectorAll('.chip.on').forEach(el => el.classList.remove('on'));
+  };
+  document.getElementById('clearCats').onclick = () => { clearCats(); applyFilter(); };
+
+  document.getElementById('resetFilters').onclick = () => {
+    filterState.basins.clear(); basinBox.querySelectorAll('.chip.on').forEach(el => el.classList.remove('on'));
+    filterState.name = ''; nameInput.value = '';
+    filterState.yearLo = y0; filterState.yearHi = y1; yearSlider.set(y0, y1); fmtYears();
+    filterState.monthLo = 1; filterState.monthHi = 12; monthSlider.set(1, 12); fmtMonths();
+    clearCats();
+    clearSelection();     // also drop any highlighted storm + detail card
+    applyFilter();
+  };
+
+  refreshStats();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RESIZABLE SIDEBAR
+// ═══════════════════════════════════════════════════════════════════════════
+(function(){
+  const side = document.getElementById('side'), rz = document.getElementById('resizer');
+  let dragging = false;
+  const onMove = (e) => {
+    if (!dragging) return;
+    const x = (e.touches ? e.touches[0].clientX : e.clientX);
+    const w = Math.max(240, Math.min(560, x));
+    side.style.width = w + 'px';
+    if (map) map.resize();
+  };
+  const stop = () => { dragging = false; rz.classList.remove('drag'); document.body.style.userSelect = ''; };
+  const start = (e) => { dragging = true; rz.classList.add('drag'); document.body.style.userSelect = 'none'; e.preventDefault(); };
+  rz.addEventListener('mousedown', start); rz.addEventListener('touchstart', start, {passive:false});
+  window.addEventListener('mousemove', onMove); window.addEventListener('touchmove', onMove, {passive:false});
+  window.addEventListener('mouseup', stop);   window.addEventListener('touchend', stop);
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  METHODOLOGY MODAL
+// ═══════════════════════════════════════════════════════════════════════════
+(function(){
+  const modal = document.getElementById('methodModal');
+  const open  = () => modal.classList.add('open');
+  const close = () => modal.classList.remove('open');
+  document.getElementById('methodBtn').onclick = open;
+  document.getElementById('methodClose').onclick = close;
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });   // backdrop
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+})();
+</script>
+</body>
+</html>
