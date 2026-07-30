@@ -746,7 +746,7 @@ function selectSID(sid){
     (s.prov ? `<span class="tag" style="background:#FAE7CD;color:#854f0b">provisional</span>` : '');
   const rows = [
     ['Peak intensity', cat.name],
-    ['Peak wind', s.maxWind > -99 ? Math.round(s.maxWind) + ' kt' : '—'],
+    ['Peak wind', s.maxWind > -99 ? `${Math.round(s.maxWind)} kt (${Math.round(s.maxWind * 1.852)} km/h)` : '—'],
     ['Min pressure', s.minPres < 1e9 ? Math.round(s.minPres) + ' hPa' : '—'],
     ['Landfall', s.landfall ? fmtDate(s.landfall) : 'none'],
     ['Duration', days != null ? days.toFixed(1) + ' days' : '—'],
