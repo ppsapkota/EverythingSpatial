@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Exposure Analysis — Papua New Guinea</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@turf/turf@7.2.0/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Condensed:wght@400;700&display=swap" rel="stylesheet" />
+<style>
+  /* OCHA Common Design System tokens (subset) */
+  :root{
+    --brand-primary:#009EDB; --brand-primary-text:#0077B8; --brand-dark:#004987;
+    --brand-light:#64BDEA; --brand-highlight:#ED1847;
+    --ink:#4D4D4D; --muted:#6f7479; --faint:#6b7075;  /* darkened for WCAG AA on white */
+    --surface:#F2F2F2; --line:#BFBFBF; --line-soft:#E2E2E2; --white:#fff;
+    --accent:var(--brand-primary-text); --accent-bg:#E6F3FA;
+    --font:'Roboto',Arial,system-ui,sans-serif;
+    --font-cond:'Roboto Condensed',Arial,sans-serif;
+    --radius:4px; --header-h:52px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:var(--font);color:var(--ink);background:var(--surface)}
+
+  .app-header{height:var(--header-h);background:var(--brand-primary);color:#fff;
+    display:flex;align-items:center;gap:14px;padding:0 18px}
+  .app-header__brand{font-weight:700;font-size:18px;letter-spacing:.06em;
+    padding-right:14px;border-right:1px solid rgba(255,255,255,.5)}
+  .app-header__title{font-size:16px;font-weight:500}
+  .app-header__spacer{flex:1}
+  .app-header__meta{font-size:12px;color:rgba(255,255,255,.9)}
+
+  #app{display:flex;height:calc(100vh - var(--header-h));overflow:hidden;background:var(--white)}
+  #side{width:340px;min-width:280px;max-width:560px;flex:none;background:var(--white);
+        display:flex;flex-direction:column;overflow-y:auto}
+  #resizer{width:6px;flex:none;cursor:col-resize;background:var(--line-soft);
+           border-left:1px solid var(--line);border-right:1px solid var(--line)}
+  #resizer:hover,#resizer.drag{background:var(--brand-light)}
+  #mapwrap{flex:1;position:relative;min-width:0}
+  #map{position:absolute;inset:0}
+
+  .sec{padding:14px 16px;border-bottom:1px solid var(--line-soft)}
+  .sec h1{font-size:18px;font-weight:500;margin:0;font-family:var(--font-cond)}
+  .sec h2{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);
+          margin:0 0 10px;font-weight:700}
+  .sec .sub{font-size:12px;color:var(--muted);margin-top:2px}
+
+  .chips{display:flex;gap:6px}
+  .chip{display:flex;align-items:center;gap:6px;font-size:13px;padding:6px 12px;border-radius:16px;
+        background:var(--surface);border:1px solid var(--line);cursor:pointer;user-select:none;flex:1;justify-content:center}
+  .chip.on{background:var(--accent-bg);border-color:var(--brand-primary);color:var(--brand-primary-text);font-weight:500}
+
+  .field{margin-top:12px}
+  .field > span{display:block;font-size:12px;color:var(--muted);margin-bottom:6px}
+  .field > span b{color:var(--ink);font-weight:500;float:right;font-variant-numeric:tabular-nums}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;
+        background:var(--line);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+        background:#fff;border:2px solid var(--brand-primary);cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#fff;
+        border:2px solid var(--brand-primary);cursor:pointer}
+
+  .btnrow{display:flex;gap:8px;margin-top:12px}
+  .btn{flex:1;height:34px;border-radius:var(--radius);border:1px solid var(--brand-primary);
+       background:var(--brand-primary);color:#fff;font-size:13px;font-weight:500;cursor:pointer;font-family:var(--font)}
+  .btn:hover{background:var(--brand-primary-text)}
+  .btn.ghost{background:#fff;color:var(--brand-primary-text)}
+  .btn.ghost:hover{background:var(--accent-bg)}
+  .btn:disabled{opacity:.5;cursor:default}
+  #pick-centre{width:100%;margin:12px 0 4px}
+  #pick-centre.on{background:var(--brand-highlight);border-color:var(--brand-highlight)}
+  .ll{display:flex;gap:6px}
+  .ll input{flex:1;min-width:0;height:34px;padding:0 8px;font-size:13px;color:var(--ink);
+       background:#fff;border:1px solid var(--line);border-radius:var(--radius);outline:none;font-family:var(--font)}
+  .ll input:focus{border-color:var(--brand-primary)}
+  .ll .btn{flex:none;width:48px}
+  #map.xhair .maplibregl-canvas{cursor:crosshair}
+
+  .hint{display:flex;gap:8px;padding:8px 10px;margin-top:10px;font-size:12px;
+        color:var(--muted);border:1px dashed var(--line);border-radius:var(--radius);line-height:1.4}
+
+  /* results */
+  .stats{display:flex;gap:10px}
+  .stat{flex:1;background:var(--surface);border:1px solid var(--line-soft);border-radius:6px;padding:10px 12px}
+  .stat .n{font-family:var(--font-cond);font-size:24px;font-weight:700;color:var(--brand-primary-text);line-height:1.1;font-variant-numeric:tabular-nums}
+  .stat .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:3px}
+  .stat .pct{font-size:11px;color:var(--faint);margin-top:2px}
+  .meta-line{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5}
+
+  .dtable{margin-top:12px;border:1px solid var(--line-soft);border-radius:6px;overflow:hidden}
+  .dtable .thead,.dtable .trow{display:grid;grid-template-columns:1fr auto auto;gap:8px;
+        padding:6px 10px;font-size:12px;align-items:center}
+  .dtable .thead{background:var(--surface);color:var(--muted);text-transform:uppercase;
+        letter-spacing:.03em;font-size:10px;font-weight:700;position:sticky;top:0}
+  .dtable .rows{max-height:260px;overflow-y:auto}
+  .dtable .trow{border-top:1px solid var(--line-soft);cursor:pointer}
+  .dtable .trow:hover{background:var(--accent-bg)}
+  .dtable .trow .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dtable .num{font-variant-numeric:tabular-nums;text-align:right}
+  .dtable .num small{color:var(--faint)}
+  .dtable .trow{align-items:start}
+  .dtable .trow .nm{overflow:hidden;line-height:1.25}
+  .dtable .trow .nm .nmtxt{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dtable .trow .nm .sub{font-size:10px;color:var(--muted);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dtable .thead .num{cursor:pointer;user-select:none}
+  .dtable .thead .num.sorted{color:var(--brand-primary-text)}
+  .dtable .thead .num.sorted::after{content:" ▾"}
+  .tablenote{font-size:11px;color:var(--muted);margin:9px 0 2px;line-height:1.4}
+  .capnote{font-size:11px;color:var(--brand-highlight);margin-top:6px}
+  .empty-res{font-size:13px;color:var(--muted);background:var(--surface);border:1px solid var(--line-soft);
+       border-radius:6px;padding:12px;text-align:center}
+  .ll-err{font-size:11px;color:var(--brand-highlight);margin-top:5px;display:none}
+  .ll input.bad{border-color:var(--brand-highlight);box-shadow:0 0 0 2px rgba(237,24,71,.15)}
+  /* numeric radius alongside the slider */
+  .radius-row{display:flex;gap:8px;align-items:center}
+  .radius-row input[type=range]{flex:1}
+  .radius-row input[type=number]{width:66px;height:30px;border:1px solid var(--line);border-radius:var(--radius);
+       padding:0 6px;font-size:13px;font-family:var(--font);color:var(--ink)}
+  /* keyboard focus visibility */
+  .chip:focus-visible,.btn:focus-visible,select:focus-visible,input:focus-visible,
+  .trow:focus-visible,.layer input:focus-visible{outline:2px solid var(--brand-dark);outline-offset:1px}
+  /* map legend gradient (unified legend) */
+  #legendbar .grad{display:flex;height:10px;margin:3px 0 2px}
+  #legendbar .grad .cell{flex:1}
+  #legendbar .gl{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:6px}
+  #legendbar .sep{height:1px;background:var(--line-soft);margin:6px 0}
+
+  .layer{display:flex;align-items:center;gap:8px;font-size:14px;padding:4px 0}
+  .layer input[type=checkbox]{accent-color:var(--brand-primary);width:16px;height:16px;cursor:pointer;flex:none}
+  .layer .sw{width:14px;height:14px;border-radius:3px;flex:none}
+  .layer .nm{flex:1;cursor:pointer}
+  select{width:100%;height:34px;padding:0 10px;font-size:13px;color:var(--ink);background:#fff;
+        border:1px solid var(--line);border-radius:var(--radius);outline:none;margin-top:8px}
+
+  .legend{display:flex;align-items:center;gap:0;margin-top:8px}
+  .legend .cell{flex:1;height:12px}
+  .legend .lbls{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:3px}
+  .source{font-size:11px;color:var(--faint);line-height:1.5}
+  .source b{color:var(--muted);font-weight:500}
+
+  /* map overlays */
+  #legendbar{position:absolute;left:12px;bottom:22px;background:rgba(255,255,255,.94);
+      border:1px solid var(--line);border-radius:6px;padding:9px 12px;font-size:11px;z-index:4;box-shadow:0 1px 6px rgba(0,0,0,.12)}
+  #legendbar .t{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:5px;font-weight:700}
+  #legendbar .row{display:flex;align-items:center;gap:7px;padding:1px 0}
+  #legendbar .dot{width:12px;height:12px;border-radius:50%;flex:none}
+
+  #loading{position:absolute;inset:0;background:rgba(255,255,255,.9);z-index:20;display:flex;
+      flex-direction:column;align-items:center;justify-content:center;gap:14px;font-size:14px;color:var(--ink)}
+  #loading .bar{width:220px;height:6px;background:var(--line-soft);border-radius:3px;overflow:hidden}
+  #loading .bar i{display:block;height:100%;width:0;background:var(--brand-primary);transition:width .2s}
+  .spin{width:34px;height:34px;border:3px solid var(--line-soft);border-top-color:var(--brand-primary);
+      border-radius:50%;animation:sp 1s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  #busy{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:6;display:none;
+      background:var(--brand-dark);color:#fff;padding:6px 14px;border-radius:14px;font-size:12px;box-shadow:0 1px 6px rgba(0,0,0,.2)}
+
+  .maplibregl-popup-content{font-family:var(--font);font-size:12px;padding:10px 12px;border-radius:6px}
+  .maplibregl-popup-content h4{margin:0 0 6px;font-family:var(--font-cond);font-size:14px;color:var(--brand-dark)}
+  .maplibregl-popup-content table{border-collapse:collapse;width:100%}
+  .maplibregl-popup-content td{padding:1px 0}
+  .maplibregl-popup-content td.k{color:var(--muted);padding-right:10px}
+  .maplibregl-popup-content td.v{text-align:right;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<header class="app-header">
+  <span class="app-header__brand">PAPUA NEW GUINEA</span>
+  <span class="app-header__title">Exposure Analysis</span>
+  <span class="app-header__spacer"></span>
+</header>
+
+<div id="app">
+  <aside id="side">
+    <div class="sec">
+      <h1>Population &amp; Building Exposure</h1>
+      <div class="sub">Click a point (or draw an area) to estimate exposed population and buildings, broken down by district (admin2).</div>
+    </div>
+
+    <div class="sec">
+      <h2>Break down by</h2>
+      <select id="level" aria-label="Breakdown level">
+        <option value="3">Admin 3 — LLG (326)</option>
+        <option value="2">Admin 2 — District (87)</option>
+      </select>
+    </div>
+
+    <div class="sec">
+      <h2>Analysis area</h2>
+      <div class="chips" role="group" aria-label="Analysis area type">
+        <div class="chip on" id="mode-circle" data-mode="circle" role="button" tabindex="0" aria-pressed="true">● Radius</div>
+        <div class="chip" id="mode-polygon" data-mode="polygon" role="button" tabindex="0" aria-pressed="false">▱ Polygon</div>
+      </div>
+
+      <div id="circle-ctl">
+        <button class="btn" id="pick-centre">◎ Set centre point (click map)</button>
+        <div class="field">
+          <span>…or enter coordinates</span>
+          <div class="ll">
+            <input type="number" id="in-lat" placeholder="Lat" step="0.0001" aria-label="Latitude" />
+            <input type="number" id="in-lon" placeholder="Long" step="0.0001" aria-label="Longitude" />
+            <button class="btn ghost" id="ll-go">Go</button>
+          </div>
+          <div class="ll-err" id="ll-err" role="alert"></div>
+        </div>
+        <div class="field">
+          <span>Radius <b><span id="rkm">10</span> km</b></span>
+          <div class="radius-row">
+            <input type="range" id="radius" min="1" max="150" step="1" value="10" aria-label="Radius in kilometres" />
+            <input type="number" id="radius-num" min="1" max="150" step="1" value="10" aria-label="Radius in kilometres (exact value)" />
+          </div>
+        </div>
+        <div class="hint" id="circle-hint">Click “Set centre point” then click the map (cross-hair), or type a Lat/Long. Adjust the radius any time.</div>
+      </div>
+
+      <div id="polygon-ctl" style="display:none">
+        <div class="hint">Click on the map to add polygon vertices. Double-click (or “Finish”) to close the shape and compute.</div>
+        <div class="btnrow">
+          <button class="btn ghost" id="poly-finish" disabled>Finish</button>
+          <button class="btn ghost" id="poly-undo" disabled>Undo point</button>
+        </div>
+      </div>
+
+      <div class="btnrow">
+        <button class="btn ghost" id="clear">Clear</button>
+      </div>
+    </div>
+
+    <div class="sec" id="results">
+      <h2>Results</h2>
+      <div id="noresult" class="hint">No analysis area yet. Drop a centre point or draw a polygon to begin.</div>
+      <div id="haveresult" style="display:none">
+        <div class="stats">
+          <div class="stat"><div class="n" id="r-pop">—</div><div class="l">People exposed</div><div class="pct" id="r-pop-pct"></div></div>
+          <div class="stat"><div class="n" id="r-bld">—</div><div class="l">Buildings exposed</div><div class="pct" id="r-bld-pct"></div></div>
+        </div>
+        <div class="capnote" id="r-cap" style="display:none"></div>
+        <div class="meta-line" id="r-meta"></div>
+        <div class="empty-res" id="r-empty" style="display:none">No population or buildings fall in this area.</div>
+        <div id="r-detail">
+          <div class="tablenote">Grey % = share of that area’s own total. Click a row to zoom, a column header to sort.</div>
+          <div class="dtable">
+            <div class="thead"><div id="dt-unit">LLG (admin3)</div><div class="num sorted" id="th-pop" role="button" tabindex="0">People</div><div class="num" id="th-bld" role="button" tabindex="0">Buildings</div></div>
+            <div class="rows" id="r-rows"></div>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost" id="export">Export table (CSV)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Layers</h2>
+      <label class="layer"><input type="checkbox" id="ly-choro" checked><span class="sw" style="background:#3690c0"></span><span class="nm" id="ly-choro-lbl">LLG population</span></label>
+      <label class="layer"><input type="checkbox" id="ly-adm2" checked><span class="sw" style="background:#666"></span><span class="nm" id="ly-adm2-lbl">LLG boundaries</span></label>
+      <label class="layer"><input type="checkbox" id="ly-bld" checked><span class="sw" style="background:#8c6d3f"></span><span class="nm">All buildings (points)</span></label>
+      <label class="layer"><input type="checkbox" id="ly-exp" checked><span class="sw" style="background:var(--brand-highlight)"></span><span class="nm">Selected buildings</span></label>
+      <div class="field"><span>Basemap</span>
+        <select id="basemap" aria-label="Basemap style">
+          <option value="positron">CARTO Positron (light)</option>
+          <option value="dark">CARTO Dark Matter</option>
+          <option value="osm">OpenStreetMap</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="sec source">
+      <b>Sources.</b> Population: WorldPop 2026 100 m constrained (R2025A). Buildings: Overture Maps
+      2026-07-22. Admin: OCHA COD-AB (HDX). Population &amp; building counts are computed live in
+      your browser. Overture attributes (height, floors, type) are sparse in PNG.
+    </div>
+  </aside>
+
+  <div id="resizer"></div>
+
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="busy">Computing…</div>
+    <div id="legendbar">
+      <div class="t" id="legend-choro-title">LLG population</div>
+      <div class="grad" id="legend-grad"></div>
+      <div class="gl" id="legend-gl"></div>
+      <div class="sep"></div>
+      <div class="row"><span class="dot" style="background:#8c6d3f"></span>Building</div>
+      <div class="row"><span class="dot" style="background:var(--brand-highlight)"></span>Selected building</div>
+      <div class="row"><span class="dot" style="background:rgba(0,158,219,.35);border:1px solid var(--brand-primary)"></span>Analysis area</div>
+    </div>
+    <div id="loading">
+      <div class="spin"></div>
+      <div id="loadmsg">Loading data…</div>
+      <div class="bar"><i id="loadbar"></i></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================================
+   CONFIG
+   ==========================================================================*/
+const CC = "png";                       // country code prefix on data files
+const DATA = {
+  meta:   `./data/${CC}_meta.json`,
+  admin0: `./data/${CC}_admin0.geojson`,
+  admin1: `./data/${CC}_admin1.geojson`,
+  admin2: `./data/${CC}_admin2.geojson`,
+  admin3: `./data/${CC}_admin3.geojson`,
+  pop:    `./data/${CC}_pop_2026_100m.tif`,
+  idx2:   `./data/${CC}_adm2_index.tif`,
+  idx3:   `./data/${CC}_adm3_index.tif`,
+  bld:    `./data/${CC}_buildings.geojson`,
+};
+const BASEMAPS = {
+  positron:{tiles:["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png","https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"],attr:"© OpenStreetMap © CARTO"},
+  dark:{tiles:["https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png","https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"],attr:"© OpenStreetMap © CARTO"},
+  osm:{tiles:["https://a.tile.openstreetmap.org/{z}/{x}/{y}.png","https://b.tile.openstreetmap.org/{z}/{x}/{y}.png"],attr:"© OpenStreetMap contributors"},
+};
+const CHORO = ["#f1eef6","#d0d1e6","#a6bddb","#74a9cf","#3690c0","#0570b0","#034e7b"]; // sequential blues
+
+/* ============================================================================
+   STATE
+   ==========================================================================*/
+const S = {
+  geo:null,                       // pop-raster georeference (from meta)
+  level:3,                        // active breakdown level: 2 = district, 3 = LLG
+  areas:{},                       // level -> {fc, map:idx->info, pcode2idx}
+  popImg:null,
+  idxImgByLevel:{}, idxImg:null,  // aligned index rasters per level; idxImg = active
+  bld:{lon:null,lat:null,didx:null,didx2:null,didx3:null,h:null,fl:null,st:null,name:null,codes:[]},
+  nBld:0, natPop:0, natBld:0,
+  mode:"circle", placing:false,
+  center:null, radiusKm:10,
+  polyPts:[], polyClosed:false,
+  lastResult:null, sortKey:"pop",
+};
+
+/* ============================================================================
+   MAP
+   ==========================================================================*/
+function baseStyle(name){
+  const b=BASEMAPS[name];
+  return {version:8, glyphs:"https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
+    sources:{basemap:{type:"raster",tiles:b.tiles,tileSize:256,attribution:b.attr}},
+    layers:[{id:"basemap",type:"raster",source:"basemap"}]};
+}
+const map = new maplibregl.Map({
+  container:"map", style:baseStyle("positron"),
+  center:[147.2,-6.5], zoom:5, attributionControl:{compact:true},
+});
+map.addControl(new maplibregl.NavigationControl({showCompass:false}),"top-right");
+map.addControl(new maplibregl.ScaleControl({maxWidth:120,unit:"metric"}),"bottom-right");
+
+const $ = id => document.getElementById(id);
+const fmt = n => n>=0 ? Math.round(n).toLocaleString("en-US") : "—";
+const fmt1 = n => n.toLocaleString("en-US",{maximumFractionDigits:1});
+
+/* ============================================================================
+   LOAD DATA
+   ==========================================================================*/
+async function fetchJSON(u){ return (await fetch(u)).json(); }
+function setLoad(msg,pct){ $("loadmsg").textContent=msg; if(pct!=null) $("loadbar").style.width=pct+"%"; }
+// stream a large JSON with a real byte-progress bar (base..base+span %)
+async function fetchJSONProgress(url, base, span){
+  const res=await fetch(url); const total=+res.headers.get("Content-Length")||0;
+  if(!res.body||!total) return res.json();
+  const reader=res.body.getReader(); let loaded=0; const chunks=[];
+  for(;;){ const {done,value}=await reader.read(); if(done) break;
+    chunks.push(value); loaded+=value.length;
+    setLoad(`Loading buildings (${(loaded/1e6).toFixed(0)} / ${(total/1e6).toFixed(0)} MB)…`, base+span*loaded/total);
+  }
+  const buf=new Uint8Array(loaded); let o=0; for(const c of chunks){ buf.set(c,o); o+=c.length; }
+  return JSON.parse(new TextDecoder().decode(buf));
+}
+
+async function loadImg(url){ return (await GeoTIFF.fromArrayBuffer(await (await fetch(url)).arrayBuffer())).getImage(); }
+
+function buildAreaLevel(level, fc){
+  const m=new Map(), p2i=new Map(), pc=`adm${level}_pcode`, nm=`adm${level}_name`;
+  for(const f of fc.features){
+    const pr=f.properties, i=pr.idx;
+    m.set(i,{idx:i, pcode:pr[pc], name:pr[nm],
+      parent: level===3 ? pr.adm2_name : pr.adm1_name,
+      pop_total:pr.pop_total||0, bld_total:pr.bld_total||0});
+    p2i.set(pr[pc], i);
+  }
+  S.areas[level]={fc, map:m, pcode2idx:p2i};
+}
+
+async function boot(){
+  try{
+    setLoad("Loading boundaries…",8);
+    const meta = await fetchJSON(DATA.meta);
+    S.geo = meta.pop_raster; S.level = meta.default_level || 3;
+
+    const adm2 = await fetchJSON(DATA.admin2), adm3 = await fetchJSON(DATA.admin3);
+    buildAreaLevel(2,adm2); buildAreaLevel(3,adm3);
+    const adm1 = await fetchJSON(DATA.admin1), adm0 = await fetchJSON(DATA.admin0);
+    for(const info of S.areas[2].map.values()){ S.natPop+=info.pop_total; S.natBld+=info.bld_total; }
+
+    setLoad("Loading population raster…",22);
+    S.popImg = await loadImg(DATA.pop);
+    S.idxImgByLevel[2] = await loadImg(DATA.idx2);
+    S.idxImgByLevel[3] = await loadImg(DATA.idx3);
+
+    setLoad("Loading buildings…",42);
+    const bldFC = await fetchJSONProgress(DATA.bld, 42, 34);   // 42% → 76%
+    setLoad("Indexing buildings…",78);
+    indexBuildings(bldFC);
+
+    setLoad("Building map…",90);
+    addLayers(adm0,adm1,bldFC);
+    applyLevel(false);                 // choropleth + rasters + labels for active level
+    $("level").value=String(S.level);
+
+    setLoad("Ready",100);
+    setTimeout(()=>$("loading").style.display="none",250);
+  }catch(e){
+    setLoad("Error: "+e.message,100); console.error(e);
+  }
+}
+
+function indexBuildings(fc){
+  const feats=fc.features, N=feats.length; S.nBld=N;
+  const lon=new Float32Array(N), lat=new Float32Array(N),
+        didx2=new Int16Array(N), didx3=new Int16Array(N),
+        h=new Float32Array(N), fl=new Int16Array(N), st=new Int16Array(N);
+  const codes=[], codeMap=new Map(), names={};
+  const p2i2=S.areas[2].pcode2idx, p2i3=S.areas[3].pcode2idx;
+  for(let i=0;i<N;i++){
+    const f=feats[i], c=f.geometry.coordinates, p=f.properties;
+    lon[i]=c[0]; lat[i]=c[1];
+    didx2[i]=p2i2.has(p.a2)?p2i2.get(p.a2):-1;
+    didx3[i]=p2i3.has(p.a3)?p2i3.get(p.a3):-1;
+    h[i]=p.h!=null?p.h:NaN;
+    fl[i]=p.fl!=null?p.fl:-1;
+    const t=p.st||p.cl||"";
+    if(t){ let cc=codeMap.get(t); if(cc==null){cc=codes.length;codes.push(t);codeMap.set(t,cc);} st[i]=cc; }
+    else st[i]=-1;
+    if(p.nm) names[i]=p.nm;
+  }
+  S.bld={lon,lat,didx:null,didx2,didx3,h,fl,st,name:names,codes};
+}
+
+// switch the active breakdown level: swap index raster, building tags, choropleth, labels
+function applyLevel(requery){
+  const lv=S.level;
+  S.idxImg = S.idxImgByLevel[lv];
+  S.bld.didx = S.bld["didx"+lv];
+  const areas = S.areas[lv];
+  map.getSource("areas").setData(areas.fc);
+  const vals=[...areas.map.values()].map(d=>d.pop_total).sort((a,b)=>a-b);
+  const q=t=>vals[Math.floor(t*(vals.length-1))];
+  const stops=[]; for(let i=0;i<CHORO.length;i++) stops.push(q(i/(CHORO.length-1)),CHORO[i]);
+  map.setPaintProperty("areas-choro","fill-color",
+    ["interpolate",["linear"],["get","pop_total"],...stops]);
+  map.setFilter("areas-exposed-line",["in",["get","idx"],["literal",[]]]);
+  buildChoroLegend(vals);
+  const unit = lv===3 ? "LLG" : "District";
+  $("dt-unit").textContent = `${unit} (admin${lv})`;
+  $("ly-choro-lbl").textContent = `${unit} population`;
+  $("ly-adm2-lbl").textContent = `${unit} boundaries`;
+  if(requery) rerun();
+}
+function setLevel(lv){ S.level=+lv; applyLevel(true); }
+function rerun(){
+  if(S.mode==="circle" && S.center) runQuery(circleQuery(S.center,S.radiusKm));
+  else if(S.mode==="polygon" && S.polyClosed && S.polyPts.length>=3) runQuery(polygonQuery(S.polyPts));
+}
+
+/* ============================================================================
+   MAP LAYERS
+   ==========================================================================*/
+function addLayers(adm0,adm1,bldFC){
+  // single "areas" source holds the active level (admin2 or admin3); swapped in applyLevel
+  map.addSource("areas",{type:"geojson",data:S.areas[S.level].fc});
+  map.addSource("adm1",{type:"geojson",data:adm1});
+
+  map.addLayer({id:"areas-choro",type:"fill",source:"areas",
+    paint:{"fill-color":"#a6bddb","fill-opacity":0.55}}); // colour stops set in applyLevel
+  map.addLayer({id:"areas-line",type:"line",source:"areas",
+    paint:{"line-color":"#5a5a5a","line-width":0.6,"line-opacity":0.7}});
+  // outline of areas touched by the current analysis (filter set at query time)
+  map.addLayer({id:"areas-exposed-line",type:"line",source:"areas",
+    filter:["in",["get","idx"],["literal",[]]],
+    paint:{"line-color":"#0077B8","line-width":2}});
+  map.addLayer({id:"adm1-line",type:"line",source:"adm1",
+    paint:{"line-color":"#333","line-width":1.1,"line-opacity":0.5}});
+
+  // all buildings: a density heatmap at low zoom (keeps the choropleth readable),
+  // fading into individual dots once zoomed past the province level
+  map.addSource("bld",{type:"geojson",data:bldFC});
+  map.addLayer({id:"bld-heat",type:"heatmap",source:"bld",maxzoom:6.5,
+    paint:{
+      "heatmap-weight":0.4,
+      "heatmap-intensity":["interpolate",["linear"],["zoom"],0,0.3,6,0.7],
+      "heatmap-radius":["interpolate",["linear"],["zoom"],0,1,3,2,6,5],
+      "heatmap-color":["interpolate",["linear"],["heatmap-density"],
+        0,"rgba(140,109,63,0)",0.3,"rgba(179,140,86,0.28)",0.6,"rgba(140,100,55,0.48)",1,"rgba(99,66,33,0.7)"],
+      "heatmap-opacity":["interpolate",["linear"],["zoom"],3,0.35,5,0.3,6.4,0]}});
+  map.addLayer({id:"bld-point",type:"circle",source:"bld",minzoom:5,
+    paint:{"circle-color":"#8c6d3f",
+      "circle-radius":["interpolate",["linear"],["zoom"],5,0.5,9,1.2,13,2.4,16,4.5],
+      "circle-opacity":["interpolate",["linear"],["zoom"],5,0.4,8,0.65,12,0.8]}});
+
+  // exposed buildings result layer
+  map.addSource("exposed",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  map.addLayer({id:"exposed-pt",type:"circle",source:"exposed",
+    paint:{"circle-color":"#ED1847","circle-radius":["interpolate",["linear"],["zoom"],5,2,12,3.5,16,5],
+      "circle-stroke-width":0.6,"circle-stroke-color":"#fff","circle-opacity":0.9}});
+
+  // analysis shape
+  map.addSource("shape",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  map.addLayer({id:"shape-fill",type:"fill",source:"shape",paint:{"fill-color":"#009EDB","fill-opacity":0.12}});
+  map.addLayer({id:"shape-line",type:"line",source:"shape",paint:{"line-color":"#0077B8","line-width":2,"line-dasharray":[2,1]}});
+  map.addSource("centre",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  map.addLayer({id:"centre-pt",type:"circle",source:"centre",
+    paint:{"circle-color":"#0077B8","circle-radius":6,"circle-stroke-width":2,"circle-stroke-color":"#fff"}});
+  // polygon draw preview
+  map.addSource("draw",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  map.addLayer({id:"draw-line",type:"line",source:"draw",paint:{"line-color":"#ED1847","line-width":2}});
+  map.addLayer({id:"draw-vtx",type:"circle",source:"draw",filter:["==","$type","Point"],
+    paint:{"circle-color":"#ED1847","circle-radius":4,"circle-stroke-width":1.5,"circle-stroke-color":"#fff"}});
+
+  wireInteractions();
+}
+
+function buildChoroLegend(vals){
+  const g=$("legend-grad"); g.innerHTML="";
+  CHORO.forEach(c=>{const d=document.createElement("div");d.className="cell";d.style.background=c;g.appendChild(d);});
+  $("legend-choro-title").textContent=`${S.level===3?"LLG":"District"} population`;
+  $("legend-gl").innerHTML=`<span>${fmt(vals[0])}</span><span>${fmt(vals[vals.length-1])}</span>`;
+}
+
+/* ============================================================================
+   GEOMETRY / COMPUTE
+   ==========================================================================*/
+const R_EARTH=6371;
+function kmPerDegLon(lat){ return 111.320*Math.cos(lat*Math.PI/180); }
+function pointInRing(x,y,ring){
+  let inside=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const xi=ring[i][0],yi=ring[i][1],xj=ring[j][0],yj=ring[j][1];
+    if(((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;
+  }
+  return inside;
+}
+// query object: {kind, insideFn(lon,lat), bbox:[minx,miny,maxx,maxy], areaKm2, label, geojson}
+function circleQuery(center,rkm){
+  const [clon,clat]=center;
+  const dLat=rkm/110.574, dLon=rkm/kmPerDegLon(clat);
+  const kx=kmPerDegLon(clat), ky=110.574, r2=rkm*rkm;
+  return {kind:"circle",
+    bbox:[clon-dLon,clat-dLat,clon+dLon,clat+dLat],
+    insideFn:(lon,lat)=>{const dx=(lon-clon)*kx,dy=(lat-clat)*ky;return dx*dx+dy*dy<=r2;},
+    areaKm2:Math.PI*rkm*rkm, label:`${rkm} km radius`,
+    geojson:turf.circle([clon,clat],rkm,{units:"kilometers",steps:96})};
+}
+function polygonQuery(ring){
+  const closed=ring[0][0]===ring[ring.length-1][0]&&ring[0][1]===ring[ring.length-1][1]?ring:[...ring,ring[0]];
+  let minx=1e9,miny=1e9,maxx=-1e9,maxy=-1e9;
+  for(const[x,y]of closed){minx=Math.min(minx,x);miny=Math.min(miny,y);maxx=Math.max(maxx,x);maxy=Math.max(maxy,y);}
+  const gj=turf.polygon([closed]);
+  return {kind:"polygon",bbox:[minx,miny,maxx,maxy],
+    insideFn:(lon,lat)=>pointInRing(lon,lat,closed),
+    areaKm2:turf.area(gj)/1e6, label:"polygon", geojson:gj};
+}
+
+async function runQuery(qy){
+  $("busy").style.display="block";
+  await new Promise(r=>setTimeout(r,10)); // let UI paint
+  try{
+    const pop = await zonalPopulation(qy);
+    const bld = countBuildings(qy);
+    S.lastResult = {qy,pop,bld};
+    renderResults(qy,pop,bld);
+  }catch(e){ console.error(e); }
+  $("busy").style.display="none";
+}
+
+// windowed raster zonal sum + per-district split via aligned index raster
+async function zonalPopulation(qy){
+  const g=S.geo, [minx,miny,maxx,maxy]=qy.bbox;
+  const col=x=>(x-g.origin_x)/g.pixel_w, row=y=>(y-g.origin_y)/g.pixel_h;
+  let c0=Math.floor(col(minx)), c1=Math.ceil(col(maxx));
+  let r0=Math.floor(row(maxy)), r1=Math.ceil(row(miny)); // maxy=north=smaller row
+  c0=Math.max(0,c0); r0=Math.max(0,r0);
+  c1=Math.min(g.width,c1); r1=Math.min(g.height,r1);
+  if(c1<=c0||r1<=r0) return {total:0,pixels:0,byDist:new Map()};
+  const win=[c0,r0,c1,r1], w=c1-c0, h=r1-r0;
+  const [popArr] = await S.popImg.readRasters({window:win,samples:[0]});
+  const [idxArr] = await S.idxImg.readRasters({window:win,samples:[0]});
+  const nod=g.nodata, byDist=new Map();
+  let total=0, pixels=0;
+  for(let r=0;r<h;r++){
+    const lat=g.origin_y+(r0+r+0.5)*g.pixel_h;
+    for(let c=0;c<w;c++){
+      const k=r*w+c, v=popArr[k];
+      if(v===nod||!(v>=0)) continue;
+      const lon=g.origin_x+(c0+c+0.5)*g.pixel_w;
+      if(!qy.insideFn(lon,lat)) continue;
+      total+=v; pixels++;
+      const di=idxArr[k];
+      if(di!==65535){ byDist.set(di,(byDist.get(di)||0)+v); }
+    }
+  }
+  return {total,pixels,byDist};
+}
+
+function countBuildings(qy){
+  const {lon,lat,didx}=S.bld, N=S.nBld, [minx,miny,maxx,maxy]=qy.bbox;
+  const byDist=new Map(); let total=0;
+  const expIdx=[]; const CAP=40000;
+  for(let i=0;i<N;i++){
+    const x=lon[i],y=lat[i];
+    if(x<minx||x>maxx||y<miny||y>maxy) continue;
+    if(!qy.insideFn(x,y)) continue;
+    total++;
+    const di=didx[i]; if(di>=0) byDist.set(di,(byDist.get(di)||0)+1);
+    if(expIdx.length<CAP) expIdx.push(i);
+  }
+  return {total,byDist,expIdx,capped:total>CAP};
+}
+
+/* ============================================================================
+   RENDER RESULTS
+   ==========================================================================*/
+function renderResults(qy,pop,bld){
+  $("noresult").style.display="none"; $("haveresult").style.display="block";
+  $("r-pop").textContent=fmt(pop.total);
+  $("r-bld").textContent=fmt(bld.total);
+  $("r-pop-pct").textContent=S.natPop?`${(100*pop.total/S.natPop).toFixed(1)}% of national`:"";
+  $("r-bld-pct").textContent=S.natBld?`${(100*bld.total/S.natBld).toFixed(1)}% of national`:"";
+  $("r-meta").innerHTML=`Area: <b>${fmt1(qy.areaKm2)}</b> km² · ${qy.label} · `+
+    `${fmt(pop.pixels)} populated cells · density ${fmt1(pop.total/Math.max(qy.areaKm2,0.01))}/km²`;
+
+  // selected-buildings map display cap
+  if(bld.capped){ $("r-cap").style.display="block";
+    $("r-cap").textContent=`Map shows the first ${fmt(bld.expIdx.length)} of ${fmt(bld.total)} selected buildings.`; }
+  else $("r-cap").style.display="none";
+
+  drawExposed(bld);
+
+  // friendly empty state
+  if(pop.total===0 && bld.total===0){
+    $("r-empty").style.display="block"; $("r-detail").style.display="none";
+    S.tableRows=[]; map.setFilter("areas-exposed-line",["in",["get","idx"],["literal",[]]]);
+    return;
+  }
+  $("r-empty").style.display="none"; $("r-detail").style.display="block";
+
+  const AM=S.areas[S.level].map;
+  const ids=new Set([...pop.byDist.keys(),...bld.byDist.keys()]);
+  S.tableRows=[...ids].map(i=>{
+    const d=AM.get(i)||{name:"(outside boundaries)",parent:"",pop_total:0,bld_total:0};
+    return {i,name:d.name,parent:d.parent,
+      pop:pop.byDist.get(i)||0, bld:bld.byDist.get(i)||0,
+      popTot:d.pop_total, bldTot:d.bld_total};
+  });
+  renderTable();
+
+  const dset=[...new Set(S.tableRows.map(r=>r.i).filter(i=>i>=0))];
+  map.setFilter("areas-exposed-line",["in",["get","idx"],["literal",dset]]);
+}
+
+function drawExposed(bld){
+  const {lon,lat}=S.bld;
+  const feats=bld.expIdx.map(i=>({type:"Feature",geometry:{type:"Point",coordinates:[lon[i],lat[i]]},properties:{}}));
+  map.getSource("exposed").setData({type:"FeatureCollection",features:feats});
+}
+
+function renderTable(){
+  const rows=[...S.tableRows].sort((a,b)=> S.sortKey==="bld" ? b.bld-a.bld : b.pop-a.pop);
+  const el=$("r-rows"); el.innerHTML="";
+  for(const r of rows){
+    const div=document.createElement("div"); div.className="trow"; div.tabIndex=0;
+    const popPct=r.popTot?` <small>${(100*r.pop/r.popTot).toFixed(0)}%</small>`:"";
+    const bldPct=r.bldTot?` <small>${(100*r.bld/r.bldTot).toFixed(0)}%</small>`:"";
+    const sub=r.parent?`<div class="sub">${r.parent}</div>`:"";
+    div.innerHTML=`<div class="nm"><span class="nmtxt" title="${r.name}${r.parent?" — "+r.parent:""}">${r.name}</span>${sub}</div>`+
+      `<div class="num">${fmt(r.pop)}${popPct}</div><div class="num">${fmt(r.bld)}${bldPct}</div>`;
+    const go=()=>zoomArea(r.i);
+    div.onclick=go; div.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); } };
+    el.appendChild(div);
+  }
+  $("th-pop").classList.toggle("sorted",S.sortKey!=="bld");
+  $("th-bld").classList.toggle("sorted",S.sortKey==="bld");
+}
+function setSort(k){ S.sortKey=k; if(S.tableRows&&S.tableRows.length) renderTable(); }
+
+function zoomArea(i){
+  const src=map.getSource("areas"); if(!src||!src._data) return;
+  const f=src._data.features.find(x=>x.properties.idx===i); if(!f) return;
+  const b=turf.bbox(f); map.fitBounds([[b[0],b[1]],[b[2],b[3]]],{padding:40,duration:600});
+}
+
+/* ============================================================================
+   INTERACTIONS
+   ==========================================================================*/
+let recomputeTimer=null;
+function scheduleRecompute(){
+  if(S.mode!=="circle"||!S.center) return;
+  clearTimeout(recomputeTimer);
+  recomputeTimer=setTimeout(()=>runQuery(circleQuery(S.center,S.radiusKm)),160);
+}
+function setCircle(){
+  if(!S.center) return;
+  const qy=circleQuery(S.center,S.radiusKm);
+  map.getSource("shape").setData({type:"FeatureCollection",features:[qy.geojson]});
+  map.getSource("centre").setData({type:"FeatureCollection",features:[
+    {type:"Feature",geometry:{type:"Point",coordinates:S.center},properties:{}}]});
+  $("in-lat").value=S.center[1].toFixed(4); $("in-lon").value=S.center[0].toFixed(4);
+}
+function setCrosshair(on){ $("map").classList.toggle("xhair",on); }
+function updatePickBtn(){
+  const b=$("pick-centre");
+  b.classList.toggle("on",S.placing);
+  b.textContent = S.placing ? "◎ Click on the map…" : "◎ Set centre point (click map)";
+}
+function togglePick(){ S.placing=!S.placing; updatePickBtn(); setCrosshair(S.placing); }
+function setRadius(v){
+  v=Math.max(1,Math.min(150,Math.round(v||0)));
+  S.radiusKm=v; $("rkm").textContent=v;
+  if($("radius").value!=v) $("radius").value=v;
+  if($("radius-num").value!=v) $("radius-num").value=v;
+  setCircle(); scheduleRecompute();
+}
+
+function wireInteractions(){
+  // mode switch (mouse + keyboard)
+  document.querySelectorAll(".chip[data-mode]").forEach(c=>{
+    c.onclick=()=>setMode(c.dataset.mode);
+    c.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setMode(c.dataset.mode); } };
+  });
+  // radius (slider + numeric box kept in sync)
+  $("radius").oninput=e=>setRadius(+e.target.value);
+  $("radius-num").oninput=e=>setRadius(+e.target.value);
+  // sortable result columns (mouse + keyboard)
+  $("th-pop").onclick=()=>setSort("pop"); $("th-bld").onclick=()=>setSort("bld");
+  $("th-pop").onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setSort("pop"); } };
+  $("th-bld").onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); setSort("bld"); } };
+  // centre by click (button toggles cross-hair placement mode)
+  $("pick-centre").onclick=togglePick;
+  // centre by coordinates, with inline validation
+  ["in-lat","in-lon"].forEach(id=>$(id).oninput=()=>{ $(id).classList.remove("bad"); $("ll-err").style.display="none"; });
+  $("ll-go").onclick=()=>{
+    const latEl=$("in-lat"), lonEl=$("in-lon"), err=$("ll-err"), b=S.geo.bounds;
+    const lat=parseFloat(latEl.value), lon=parseFloat(lonEl.value);
+    latEl.classList.remove("bad"); lonEl.classList.remove("bad");
+    let msg="";
+    if(isNaN(lat)){ latEl.classList.add("bad"); msg="Enter a numeric latitude."; }
+    else if(isNaN(lon)){ lonEl.classList.add("bad"); msg="Enter a numeric longitude."; }
+    else if(lat<b[1]-0.5||lat>b[3]+0.5||lon<b[0]-0.5||lon>b[2]+0.5){
+      latEl.classList.add("bad"); lonEl.classList.add("bad");
+      msg=`Outside Papua New Guinea (lat ${b[1].toFixed(1)}…${b[3].toFixed(1)}, lon ${b[0].toFixed(1)}…${b[2].toFixed(1)}).`;
+    }
+    if(msg){ err.textContent=msg; err.style.display="block"; return; }
+    err.style.display="none";
+    S.placing=false; updatePickBtn(); setCrosshair(false);
+    S.center=[lon,lat]; setCircle(); runQuery(circleQuery(S.center,S.radiusKm));
+    map.easeTo({center:[lon,lat],zoom:Math.max(map.getZoom(),9),duration:600});
+  };
+  // clear
+  $("clear").onclick=clearAll;
+  // polygon buttons
+  $("poly-finish").onclick=finishPolygon;
+  $("poly-undo").onclick=()=>{ S.polyPts.pop(); drawPolyPreview(); $("poly-finish").disabled=S.polyPts.length<3; $("poly-undo").disabled=!S.polyPts.length; };
+
+  // map click
+  map.on("click",onMapClick);
+  map.on("dblclick",e=>{ if(S.mode==="polygon"&&S.polyPts.length>=3){ e.preventDefault(); finishPolygon(); }});
+
+  // breakdown level
+  $("level").onchange=e=>setLevel(e.target.value);
+
+  // building popup (only when not in a placement/draw interaction)
+  map.on("click","bld-point",e=>{ if(!S.placing && S.mode!=="polygon") buildingPopup(e); });
+  // area popup
+  map.on("click","areas-choro",e=>{ if(!S.placing && S.mode!=="polygon") areaPopup(e); });
+  ["bld-point","areas-choro"].forEach(l=>{
+    map.on("mouseenter",l,()=>{ if(!S.placing && S.mode!=="polygon") map.getCanvas().style.cursor="pointer"; });
+    map.on("mouseleave",l,()=>map.getCanvas().style.cursor="");
+  });
+
+  // layer toggles
+  $("ly-choro").onchange=e=>setVis(["areas-choro"],e.target.checked);
+  $("ly-adm2").onchange=e=>setVis(["areas-line"],e.target.checked);
+  $("ly-exp").onchange=e=>setVis(["exposed-pt"],e.target.checked);
+  $("ly-bld").onchange=e=>setVis(["bld-heat","bld-point"],e.target.checked);
+  $("basemap").onchange=e=>switchBasemap(e.target.value);
+  $("export").onclick=exportCSV;
+}
+function setVis(layers,on){ layers.forEach(l=>map.getLayer(l)&&map.setLayoutProperty(l,"visibility",on?"visible":"none")); }
+
+function setMode(m){
+  S.mode=m; S.placing=false;
+  document.querySelectorAll(".chip[data-mode]").forEach(c=>{
+    const on=c.dataset.mode===m; c.classList.toggle("on",on); c.setAttribute("aria-pressed",on?"true":"false");
+  });
+  $("circle-ctl").style.display=m==="circle"?"block":"none";
+  $("polygon-ctl").style.display=m==="polygon"?"block":"none";
+  map.doubleClickZoom[m==="polygon"?"disable":"enable"]();
+  updatePickBtn();
+  setCrosshair(m==="polygon");
+  resetPolygon();
+}
+function onMapClick(e){
+  const ll=[e.lngLat.lng,e.lngLat.lat];
+  if(S.mode==="circle"){
+    if(!S.placing) return;            // only place a centre when the button armed it
+    S.center=ll; setCircle(); runQuery(circleQuery(S.center,S.radiusKm));
+    S.placing=false; updatePickBtn(); setCrosshair(false);
+  }else if(S.mode==="polygon"&&!S.polyClosed){
+    S.polyPts.push(ll); drawPolyPreview();
+    $("poly-finish").disabled=S.polyPts.length<3; $("poly-undo").disabled=false;
+  }
+}
+function drawPolyPreview(){
+  const feats=S.polyPts.map(p=>({type:"Feature",geometry:{type:"Point",coordinates:p},properties:{}}));
+  if(S.polyPts.length>=2) feats.push({type:"Feature",geometry:{type:"LineString",coordinates:S.polyPts},properties:{}});
+  map.getSource("draw").setData({type:"FeatureCollection",features:feats});
+}
+function finishPolygon(){
+  if(S.polyPts.length<3) return;
+  S.polyClosed=true; setCrosshair(false);
+  const qy=polygonQuery(S.polyPts);
+  map.getSource("shape").setData({type:"FeatureCollection",features:[qy.geojson]});
+  map.getSource("draw").setData({type:"FeatureCollection",features:[]});
+  const px=estimatePixels(qy.bbox);
+  if(px>12e6 && !confirm(`This area covers ~${fmt(px)} raster cells and may take a few seconds. Continue?`)){ return; }
+  runQuery(qy);
+}
+function estimatePixels(bbox){
+  const g=S.geo;
+  const w=(bbox[2]-bbox[0])/Math.abs(g.pixel_w), h=(bbox[3]-bbox[1])/Math.abs(g.pixel_h);
+  return Math.max(0,w*h);
+}
+function resetPolygon(){ S.polyPts=[]; S.polyClosed=false; map.getSource&&map.getSource("draw")&&map.getSource("draw").setData({type:"FeatureCollection",features:[]}); $("poly-finish").disabled=true; $("poly-undo").disabled=true; }
+function clearAll(){
+  S.center=null; S.placing=false; updatePickBtn(); setCrosshair(S.mode==="polygon");
+  $("in-lat").value=""; $("in-lon").value=""; resetPolygon();
+  ["shape","centre","exposed","draw"].forEach(s=>map.getSource(s)&&map.getSource(s).setData({type:"FeatureCollection",features:[]}));
+  if(map.getLayer("areas-exposed-line")) map.setFilter("areas-exposed-line",["in",["get","idx"],["literal",[]]]);
+  $("ll-err").style.display="none"; $("in-lat").classList.remove("bad"); $("in-lon").classList.remove("bad");
+  $("noresult").style.display="block"; $("haveresult").style.display="none"; S.lastResult=null;
+}
+
+function areaName(level,pcode){ const a=S.areas[level]; const d=a.map.get(a.pcode2idx.get(pcode)); return d?d.name:null; }
+function buildingPopup(e){
+  const f=map.queryRenderedFeatures(e.point,{layers:["bld-point"]})[0]; if(!f) return;
+  const p=f.properties, rows=[];
+  if(p.h!=null) rows.push(["Height",`${(+p.h).toFixed(1)} m`]);
+  if(p.fl!=null) rows.push(["Floors",p.fl]);
+  const t=p.st||p.cl; if(t) rows.push(["Type",t]);
+  const llg=areaName(3,p.a3); if(llg) rows.push(["LLG",llg]);
+  const dist=areaName(2,p.a2); if(dist) rows.push(["District",dist]);
+  new maplibregl.Popup().setLngLat(e.lngLat).setHTML(
+    `<h4>${p.nm||"Building"}</h4><table>${rows.map(r=>`<tr><td class="k">${r[0]}</td><td class="v">${r[1]}</td></tr>`).join("")||"<tr><td>No attributes</td></tr>"}</table>`
+  ).addTo(map);
+}
+function areaPopup(e){
+  const f=e.features[0]; if(!f) return; const p=f.properties, lv=S.level;
+  const nm=p[`adm${lv}_name`], pcode=p[`adm${lv}_pcode`];
+  const parent = lv===3 ? `${p.adm2_name} · ${p.adm1_name}` : p.adm1_name;
+  new maplibregl.Popup().setLngLat(e.lngLat).setHTML(
+    `<h4>${nm}</h4><table>`+
+    `<tr><td class="k">${lv===3?"District · Province":"Province"}</td><td class="v">${parent}</td></tr>`+
+    `<tr><td class="k">Population</td><td class="v">${fmt(p.pop_total)}</td></tr>`+
+    `<tr><td class="k">Buildings</td><td class="v">${fmt(p.bld_total)}</td></tr>`+
+    `<tr><td class="k">Pcode</td><td class="v">${pcode}</td></tr></table>`
+  ).addTo(map);
+}
+
+function switchBasemap(name){
+  // swap only the raster tiles to preserve all data layers
+  map.getSource("basemap").setTiles(BASEMAPS[name].tiles);
+}
+
+function exportCSV(){
+  if(!S.tableRows) return;
+  const q=S.lastResult.qy, lv=S.level, AM=S.areas[lv].map;
+  const unit=lv===3?"llg":"district", parent=lv===3?"district":"province";
+  const head=[`adm${lv}_pcode`,unit,parent,"people_exposed",unit+"_population","pct_pop",
+              "buildings_exposed",unit+"_buildings","pct_bld"];
+  const lines=[head.join(",")];
+  for(const r of S.tableRows){
+    const d=AM.get(r.i)||{};
+    lines.push([d.pcode||"",`"${r.name}"`,`"${r.parent||""}"`,Math.round(r.pop),r.popTot,
+      r.popTot?(100*r.pop/r.popTot).toFixed(1):"",r.bld,r.bldTot,r.bldTot?(100*r.bld/r.bldTot).toFixed(1):""].join(","));
+  }
+  const blob=new Blob([lines.join("\n")],{type:"text/csv"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download=`${CC}_exposure_adm${lv}_${q.kind}_${new Date().toISOString().slice(0,16).replace(/[:T]/g,"")}.csv`; a.click();
+}
+
+/* ============================================================================
+   SIDEBAR RESIZER
+   ==========================================================================*/
+(function(){const rz=$("resizer"),side=$("side");let drag=false;
+  rz.onmousedown=()=>{drag=true;rz.classList.add("drag");document.body.style.userSelect="none";};
+  window.onmousemove=e=>{if(!drag)return;const w=Math.min(560,Math.max(280,e.clientX));side.style.width=w+"px";map.resize();};
+  window.onmouseup=()=>{drag=false;rz.classList.remove("drag");document.body.style.userSelect="";};
+})();
+
+map.on("load",boot);
+</script>
+</body>
+</html>
